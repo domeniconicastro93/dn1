@@ -1,0 +1,23 @@
+PHASE 3 – MOBILE APP (REACT NATIVE / EXPO)
+
+GOALS:
+- Create Expo RN project.
+- Implement navigation:
+    • Tab bar (Feed, Live, Games, Community, Profile)
+    • Stack navigation for details
+- Replicate all UI from Figma for mobile.
+- Implement vertical feed (FlashList).
+- Implement Save Replay button + haptic feedback.
+- Implement placeholder cloud gaming view (deep link or webview).
+- Implement i18n (same keys as web).
+- Mirror exact routes and DTO usage of the web.
+
+RULES:
+- No backend coding.
+- No real streaming yet.
+- All shapes must match Phase 2.
+- Keep performance 60 FPS.
+
+STOP when:
+- Mobile UI is consistent with web
+- All flows exist, even if stubbed

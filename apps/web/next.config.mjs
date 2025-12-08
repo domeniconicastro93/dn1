@@ -1,0 +1,65 @@
+import createNextIntlPlugin from 'next-intl/plugin';
+
+const withNextIntl = createNextIntlPlugin();
+
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+    // Enable React strict mode
+    reactStrictMode: true,
+
+    // Transpile shared packages
+    transpilePackages: ['@strike/shared-i18n'],
+
+    // Image optimization
+    images: {
+        formats: ['image/avif', 'image/webp'],
+        remotePatterns: [
+            {
+                protocol: 'https',
+                hostname: '**',
+            },
+        ],
+    },
+
+    // Experimental features for better performance
+    experimental: {
+        optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
+    },
+
+    // Headers for SEO and security
+    async headers() {
+        return [
+            {
+                source: '/:path*',
+                headers: [
+                    {
+                        key: 'X-DNS-Prefetch-Control',
+                        value: 'on',
+                    },
+                    {
+                        key: 'X-Frame-Options',
+                        value: 'SAMEORIGIN',
+                    },
+                    {
+                        key: 'X-Content-Type-Options',
+                        value: 'nosniff',
+                    },
+                    {
+                        key: 'Referrer-Policy',
+                        value: 'origin-when-cross-origin',
+                    },
+                ],
+            },
+        ];
+    },
+
+    // Redirects for SEO
+    async redirects() {
+        return [
+            // Redirect root to default locale if needed
+            // This will be handled by next-intl middleware
+        ];
+    },
+};
+
+export default withNextIntl(nextConfig);

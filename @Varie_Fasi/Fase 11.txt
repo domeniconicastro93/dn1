@@ -1,0 +1,10 @@
+PHASE 11 – QA & BUGBOT
+
+GOALS:
+- Run automated checks.
+- Fix bugs found in web, mobile, backend, infra.
+- Add missing tests.
+- Ensure all contracts are respected.
+
+STOP when:
+- The entire platform is stable, typed, and ready for production deployment

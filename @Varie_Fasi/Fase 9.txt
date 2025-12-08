@@ -1,0 +1,16 @@
+PHASE 9 – SEO / SEM ENGINE
+
+GOALS:
+- Generate full hreflang matrix.
+- Generate multilingual sitemaps.
+- Generate landing pages /lp/[locale]/[campaign]/[slug].
+- Implement schema.org (VideoObject, Person, BroadcastEvent, VideoGame).
+- Implement server-side analytics events.
+- Implement TTL caching SWR.
+
+RULES:
+- 100% SEO-compliant.
+- Follow all rules from the Master Prompt.
+
+STOP when:
+- All pages match SEO and SEM guidelines

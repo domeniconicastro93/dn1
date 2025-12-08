@@ -1,0 +1,52 @@
+# Service Dockerfile Template
+# Copy this file and replace SERVICE_NAME with actual service name
+# Example: cp service.Dockerfile.template auth-service.Dockerfile
+
+FROM node:20-alpine AS base
+
+FROM base AS deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+COPY packages/shared-types/package.json ./packages/shared-types/
+COPY packages/shared-utils/package.json ./packages/shared-utils/
+COPY packages/shared-db/package.json ./packages/shared-db/
+COPY services/SERVICE_NAME/package.json ./services/SERVICE_NAME/
+
+RUN npm ci
+
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY packages ./packages
+COPY services/SERVICE_NAME ./services/SERVICE_NAME
+
+RUN npm run build --workspace=packages/shared-types
+RUN npm run build --workspace=packages/shared-utils
+RUN npm run build --workspace=packages/shared-db
+RUN npm run build --workspace=services/SERVICE_NAME
+
+FROM base AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nodejs
+
+COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nodejs:nodejs /app/packages ./packages
+COPY --from=builder --chown=nodejs:nodejs /app/services/SERVICE_NAME/dist ./services/SERVICE_NAME/dist
+COPY --from=builder --chown=nodejs:nodejs /app/services/SERVICE_NAME/package.json ./services/SERVICE_NAME/
+
+USER nodejs
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:${PORT}/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+
+EXPOSE 3000
+
+CMD ["node", "services/SERVICE_NAME/dist/index.js"]
+

@@ -1,0 +1,58 @@
+{
+  "common": {
+    "appName": "Strike",
+    "tagline": "Cloud Gaming. Istantaneo. Sociale.",
+    "playNow": "Gioca Ora",
+    "signUp": "Registrati",
+    "signIn": "Accedi",
+    "learnMore": "Scopri di più",
+    "getStarted": "Inizia"
+  },
+  "nav": {
+    "home": "Home",
+    "feed": "Feed",
+    "games": "Giochi",
+    "live": "Live",
+    "clips": "Clip",
+    "community": "Community",
+    "pricing": "Prezzi"
+  },
+  "feed": {
+    "title": "Feed",
+    "description": "Scopri clip, reel e live stream di gaming",
+    "tabs": {
+      "forYou": "Per Te",
+      "following": "Seguiti",
+      "explore": "Esplora"
+    }
+  },
+  "games": {
+    "title": "Giochi",
+    "description": "Sfoglia la nostra libreria di oltre 2000 giochi. Gioca istantaneamente nel cloud.",
+    "searchPlaceholder": "Cerca giochi..."
+  },
+  "auth": {
+    "login": {
+      "title": "Accedi",
+      "description": "Bentornato su Strike",
+      "submit": "Accedi",
+      "forgotPassword": "Password dimenticata?"
+    },
+    "register": {
+      "title": "Crea Account",
+      "description": "Unisciti a Strike e inizia a giocare",
+      "submit": "Registrati"
+    }
+  },
+  "creator": {
+    "title": "Profilo Creatore"
+  },
+  "play": {
+    "saveReplay": "Salva Replay",
+    "saving": "Salvataggio...",
+    "processing": "Elaborazione...",
+    "saved": "Replay salvato!",
+    "error": "Errore nel salvare il replay"
+  }
+}
+

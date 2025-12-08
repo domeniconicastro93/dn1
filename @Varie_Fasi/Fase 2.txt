@@ -1,0 +1,22 @@
+PHASE 2 – WEB FRONTEND IMPLEMENTATION (NEXT.JS 15)
+
+GOALS:
+- Create the Next.js 15 project structure (App Router).
+- Implement the folder layout: app/, components/, lib/, features/
+- Implement i18n for 17 languages (next-intl or equivalent).
+- Implement SEO foundations (canonical, hreflang, OG tags).
+- Implement all static pages from the Figma analysis.
+- Implement the WebRTC cloud gaming player placeholder (NO real streaming yet).
+- Implement Save Replay button → calls the replay endpoint (mock until Phase 5).
+- Implement Reels/Feed UI skeleton (NO recommendation logic yet).
+- Ensure strict type safety.
+
+RULES:
+- DO NOT write backend code.
+- DO NOT invent DTOs; use only the Master Prompt ones.
+- If a DTO is missing, define a temporary interface in /types/phase2 but mark with TODO.
+
+STOP when:
+- Web compiles
+- All pages and flows exist (even with placeholders)
+- SEO tags exist for all languages

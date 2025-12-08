@@ -1,0 +1,33 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "commonjs",
+        "lib": [
+            "ES2022"
+        ],
+        "outDir": "./dist",
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "resolveJsonModule": true,
+        "paths": {
+            "@strike/shared-types": [
+                "../../packages/shared-types/src"
+            ],
+            "@strike/shared-utils": [
+                "../../packages/shared-utils/src"
+            ],
+            "@strike/shared-db": [
+                "../../packages/shared-db/src"
+            ]
+        }
+    },
+    "include": [
+        "src/**/*"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist"
+    ]
+}

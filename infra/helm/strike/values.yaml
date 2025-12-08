@@ -1,0 +1,297 @@
+# Default values for Strike Gaming Cloud
+# This is a YAML-formatted file.
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# Service configurations
+services:
+  gateway:
+    enabled: true
+    replicaCount: 3
+    image:
+      repository: strike/gateway-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3000
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+  
+  auth:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/auth-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3001
+  
+  user:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/user-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3002
+  
+  game:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/game-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3003
+  
+  session:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/session-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3004
+  
+  replay:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/replay-engine-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3005
+  
+  videoEditing:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/video-editing-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3006
+  
+  clip:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/clip-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3007
+  
+  feed:
+    enabled: true
+    replicaCount: 3
+    image:
+      repository: strike/feed-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3008
+  
+  payments:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/payments-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3009
+  
+  wallet:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/wallet-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3010
+  
+  analytics:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/analytics-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3011
+  
+  orchestrator:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/orchestrator-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3012
+  
+  streaming:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/streaming-ingest-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3014
+  
+  creator:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/creator-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3015
+  
+  community:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/community-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3016
+  
+  chat:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/chat-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3017
+  
+  notification:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/notification-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3018
+  
+  seo:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/seo-indexer-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3019
+  
+  moderation:
+    enabled: true
+    replicaCount: 2
+    image:
+      repository: strike/moderation-service
+      tag: latest
+    service:
+      type: ClusterIP
+      port: 3020
+
+# PostgreSQL
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: "change-me"
+    database: "strike"
+  persistence:
+    enabled: true
+    size: 20Gi
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+# Redis
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    password: "change-me"
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "250m"
+      limits:
+        memory: "1Gi"
+        cpu: "500m"
+
+# Kafka
+kafka:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 20Gi
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+# Ingress
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  hosts:
+    - host: strike.gg
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: strike-tls
+      hosts:
+        - strike.gg
+
+# Monitoring
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    retention: "30d"
+  grafana:
+    enabled: true
+    adminPassword: "change-me"
+  loki:
+    enabled: true
+  opentelemetry:
+    enabled: true
+

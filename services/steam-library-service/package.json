@@ -1,0 +1,28 @@
+{
+  "name": "@strike/steam-library-service",
+  "version": "0.1.0",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^9.3.1",
+    "@fastify/cors": "^8.5.0",
+    "@fastify/rate-limit": "^9.1.0",
+    "@strike/shared-db": "workspace:*",
+    "@strike/shared-types": "workspace:*",
+    "@strike/shared-utils": "workspace:*",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.26.2",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/node-fetch": "^3.0.3",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@strike/chat-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^8.4.0",
+    "@fastify/websocket": "^8.3.0",
+    "@strike/shared-types": "workspace:*",
+    "@strike/shared-utils": "workspace:*",
+    "@strike/shared-db": "workspace:*",
+    "fastify": "^4.24.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

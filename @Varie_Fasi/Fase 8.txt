@@ -1,0 +1,24 @@
+PHASE 8 – FEED + RECOMMENDATION ENGINE
+
+GOALS:
+- Implement scoring formula (14 weights).
+- Implement:
+    • watchTimeRatio
+    • completion
+    • share
+    • like/dislike
+    • rewatch
+    • localeMatch
+    • creatorQualityScore
+    • diversity penalty
+    • repetition penalty
+    • cold start boost
+- Integrate moderation-service signals.
+- Serve /for-you, /following, /explore.
+
+RULES:
+- This must drastically optimize retention.
+- Ensure scalable read-paths (Redis + Scylla/Cassandra optional).
+
+STOP when:
+- Feed responds with ordered, realistic results

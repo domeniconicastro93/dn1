@@ -1,0 +1,33 @@
+PHASE 4 – BACKEND MICROSERVICES & API CONTRACTS
+
+GOALS:
+- Set up monorepo structure: /services/<name>/src
+- Implement ONLY the following:
+    1. gateway-service
+    2. auth-service
+    3. user-service
+    4. payments-service
+    5. wallet-service
+    6. game-service
+    7. session-service
+    8. orchestrator-service (only external interface)
+    9. replay-engine-service (API only)
+    10. video-editing-service (API only)
+    11. clip-service
+    12. feed-service
+    13. analytics-service
+    14. moderation-service
+- Implement database schemas.
+- Implement ALL DTOs as per Master Prompt.
+- Implement rate-limits, errors, response envelope.
+
+RULES:
+- DO NOT implement orchestrator internals yet.
+- DO NOT implement replay buffer yet.
+- DO NOT implement rendering yet.
+- Follow Execution Policy: no breaking contracts.
+
+STOP when:
+- All services compile
+- All API contracts exist
+- Web/Mobile can call these APIs successfully

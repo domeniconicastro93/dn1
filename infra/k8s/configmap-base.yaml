@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: strike-config
+  namespace: strike
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  BASE_URL: "https://strike.gg"
+  # Service URLs (internal)
+  GATEWAY_SERVICE_URL: "http://gateway-service:3000"
+  AUTH_SERVICE_URL: "http://auth-service:3001"
+  USER_SERVICE_URL: "http://user-service:3002"
+  GAME_SERVICE_URL: "http://game-service:3003"
+  SESSION_SERVICE_URL: "http://session-service:3004"
+  ORCHESTRATOR_SERVICE_URL: "http://orchestrator-service:3005"
+  REPLAY_ENGINE_SERVICE_URL: "http://replay-engine-service:3006"
+  VIDEO_EDITING_SERVICE_URL: "http://video-editing-service:3007"
+  CLIP_SERVICE_URL: "http://clip-service:3008"
+  FEED_SERVICE_URL: "http://feed-service:3009"
+  ANALYTICS_SERVICE_URL: "http://analytics-service:3010"
+  MODERATION_SERVICE_URL: "http://moderation-service:3011"
+  STREAMING_INGEST_SERVICE_URL: "http://streaming-ingest-service:3012"
+  PAYMENTS_SERVICE_URL: "http://payments-service:3013"
+  WALLET_SERVICE_URL: "http://wallet-service:3014"
+  # Database
+  DATABASE_URL: "postgresql://strike:${DB_PASSWORD}@postgres-service:5432/strike"
+  # Redis
+  REDIS_URL: "redis://redis-service:6379"
+  # Object Storage
+  STORAGE_BASE_URL: "https://storage.strike.gg"
+  S3_ENDPOINT: "https://s3.strike.gg"
+  S3_BUCKET: "strike-media"
+  # Message Bus
+  KAFKA_BROKERS: "kafka-service:9092"
+  # Monitoring
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+

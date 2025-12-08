@@ -1,0 +1,49 @@
+# Base Dockerfile for Node.js/TypeScript services
+# Multi-stage build for smaller images
+
+FROM node:20-alpine AS base
+
+# Install dependencies only when needed
+FROM base AS deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json* ./
+COPY packages/*/package.json ./packages/*/
+COPY services/*/package.json ./services/*/
+COPY apps/*/package.json ./apps/*/
+
+# Install dependencies
+RUN npm ci
+
+# Rebuild the source code only when needed
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Build shared packages first
+RUN npm run build --workspace=packages/shared-types
+RUN npm run build --workspace=packages/shared-utils
+RUN npm run build --workspace=packages/shared-db
+
+# Production image, copy all the files and run the app
+FROM base AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nodejs
+
+# Copy built packages
+COPY --from=builder --chown=nodejs:nodejs /app/packages ./packages
+COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
+
+USER nodejs
+
+EXPOSE 3000
+
+CMD ["node", "--version"]
+

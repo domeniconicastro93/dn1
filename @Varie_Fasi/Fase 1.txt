@@ -1,0 +1,24 @@
+PHASE 1 – FIGMA & REQUIREMENTS ANALYSIS
+
+GOALS:
+- Parse the Figma prototype (web + mobile) provided by me.
+- Extract all pages, components, overlays, routes, user flows.
+- Map each Figma screen to:
+  • a route
+  • a component
+  • backend calls required
+  • state requirements
+  • error and edge cases
+- Build the ROUTING BLUEPRINT for Web and Mobile.
+- Build the COMPONENT BLUEPRINT (UI elements).
+- Build the DATAFLOW BLUEPRINT (API calls and events).
+- Identify all missing information with TODO comments.
+
+RULES:
+- Do NOT write code yet.
+- Only output structured markdown.
+- Keep consistency with the Master Prompt.
+
+STOP when:
+- Blueprints are produced.
+- No coding has started.

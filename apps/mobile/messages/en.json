@@ -1,0 +1,58 @@
+{
+  "common": {
+    "appName": "Strike",
+    "tagline": "Cloud Gaming. Instant. Social.",
+    "playNow": "Play Now",
+    "signUp": "Sign Up",
+    "signIn": "Sign In",
+    "learnMore": "Learn More",
+    "getStarted": "Get Started"
+  },
+  "nav": {
+    "home": "Home",
+    "feed": "Feed",
+    "games": "Games",
+    "live": "Live",
+    "clips": "Clips",
+    "community": "Community",
+    "pricing": "Pricing"
+  },
+  "feed": {
+    "title": "Feed",
+    "description": "Discover trending gaming clips, reels, and live streams",
+    "tabs": {
+      "forYou": "For You",
+      "following": "Following",
+      "explore": "Explore"
+    }
+  },
+  "games": {
+    "title": "Games",
+    "description": "Browse our library of 2000+ games. Play instantly in the cloud.",
+    "searchPlaceholder": "Search games..."
+  },
+  "auth": {
+    "login": {
+      "title": "Sign In",
+      "description": "Welcome back to Strike",
+      "submit": "Sign In",
+      "forgotPassword": "Forgot password?"
+    },
+    "register": {
+      "title": "Create Account",
+      "description": "Join Strike and start gaming",
+      "submit": "Sign Up"
+    }
+  },
+  "creator": {
+    "title": "Creator Profile"
+  },
+  "play": {
+    "saveReplay": "Save Replay",
+    "saving": "Saving...",
+    "processing": "Processing...",
+    "saved": "Replay saved!",
+    "error": "Error saving replay"
+  }
+}
+

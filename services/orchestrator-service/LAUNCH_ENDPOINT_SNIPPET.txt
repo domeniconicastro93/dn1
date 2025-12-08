@@ -1,0 +1,70 @@
+/**
+ * Sunshine Game Launch Test Endpoint
+ * 
+ * Simple endpoint to test game launching with Basic Auth
+ * Add this to index.ts after the pairing test endpoint
+ */
+
+// Test endpoint for launching game with Basic Auth (NEW - Simplified Approach)
+app.get('/test/sunshine/launch', async (request, reply) => {
+  try {
+    const sunshineHost = process.env.SUNSHINE_URL || '20.31.130.73';
+    const sunshinePort = parseInt(process.env.SUNSHINE_PORT || '47985', 10);
+    const useHttps = process.env.SUNSHINE_USE_HTTPS === 'true';
+    const username = process.env.SUNSHINE_USERNAME || 'strike';
+    const password = process.env.SUNSHINE_PASSWORD || '';
+    const steamAppId = '1515950'; // Capcom Arcade Stadium
+
+    app.log.info(`[TEST LAUNCH] Testing game launch to ${sunshineHost}:${sunshinePort}`);
+
+    const protocol = useHttps ? 'https' : 'http';
+    const url = `${protocol}://${sunshineHost}:${sunshinePort}/api/launch`;
+    
+    const credentials = Buffer.from(`${username}:${password}`).toString('base64');
+
+    const httpsModule = await import('https');
+    const httpsAgent = useHttps ? new httpsModule.Agent({
+      rejectUnauthorized: false,
+    }) : undefined;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${credentials}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        app: `steam://rungameid/${steamAppId}`,
+      }),
+      ...(httpsAgent && { agent: httpsAgent }),
+    });
+
+    const responseText = await response.text();
+    app.log.info(`[TEST LAUNCH] Response status: ${response.status}`);
+    app.log.info(`[TEST LAUNCH] Response body: ${responseText}`);
+
+    if (response.ok) {
+      app.log.info('[TEST LAUNCH] Launch successful!');
+      return reply.status(200).send(successResponse({
+        success: true,
+        steamAppId,
+        response: responseText,
+        message: 'Game launch successful',
+      }));
+    } else {
+      app.log.error('[TEST LAUNCH] Launch failed:', responseText);
+      return reply.status(500).send(errorResponse(
+        ErrorCodes.INTERNAL_ERROR,
+        'Game launch failed',
+        { status: response.status, response: responseText }
+      ));
+    }
+  } catch (error) {
+    app.log.error('[TEST LAUNCH] Exception during launch:', error);
+    return reply.status(500).send(errorResponse(
+      ErrorCodes.INTERNAL_ERROR,
+      'Error testing game launch',
+      { error: error instanceof Error ? error.message : 'Unknown error' }
+    ));
+  }
+});

@@ -1,0 +1,20 @@
+PHASE 6 – REPLAY ENGINE (90–120s BUFFER)
+
+GOALS:
+- Implement 120s circular RAM buffer (FFmpeg/GStreamer).
+- Duplicate encoded stream: one to client, one to buffer.
+- Implement SaveReplay(sessionId).
+- Implement NVENC settings exactly:
+    • preset P1 / low-latency-high-quality
+    • CBR 8–15 Mbps
+    • GOP = 120
+    • low latency VBV
+- Upload MP4 to storage.
+- Emit ReplayCreated event.
+
+RULES:
+- Zero disk I/O in hot path.
+- Use high-performance pipeline.
+
+STOP when:
+- SaveReplay works and clip uploads correctly

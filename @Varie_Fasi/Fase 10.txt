@@ -1,0 +1,16 @@
+PHASE 10 – INFRASTRUCTURE & DEPLOYMENT
+
+GOALS:
+- Create Dockerfiles per service.
+- Create Kubernetes manifests (+ optional Helm charts).
+- Create Terraform modules for:
+    • Postgres
+    • Redis
+    • Kafka/NATS
+    • Object Storage
+    • CDN
+    • Monitoring stack
+- Create CI/CD pipeline.
+
+STOP when:
+- Staging environment can run the whole system

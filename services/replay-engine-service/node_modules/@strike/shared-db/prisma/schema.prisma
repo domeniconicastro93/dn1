@@ -1,0 +1,653 @@
+// Prisma Schema for Strike Gaming Cloud
+// Generated from shared-db TypeScript types
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTH SCHEMA
+// ============================================================================
+
+model User {
+  id                String   @id @default(uuid())
+  email             String   @unique
+  passwordHash      String   @map("password_hash")
+  handle            String?  @unique
+  displayName       String?  @map("display_name")
+  avatarUrl         String?  @map("avatar_url")
+  locale            String   @default("en")
+  marketingConsent  Boolean  @default(false) @map("marketing_consent")
+  emailVerified     Boolean  @default(false) @map("email_verified")
+  premiumTier       String?  @map("premium_tier")
+  premiumExpiresAt  DateTime? @map("premium_expires_at")
+  referralCode      String?  @unique @map("referral_code")
+  referredBy        String?  @map("referred_by")
+  steamId64         String?  @unique @map("steam_id_64")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  refreshTokens     RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  sessions         Session[]
+  clips            Clip[]
+  liveStreams      LiveStream[]
+  wallet           Wallet?
+  transactions     Transaction[]
+  analyticsEvents  AnalyticsEvent[]
+  notifications    Notification[]
+  chatMessages     ChatMessage[]
+  chatChannelMembers ChatChannelMember[]
+  communityHubMembers CommunityHubMember[]
+  creatorProfile   Creator?
+  follows          Follow[] @relation("UserFollows")
+  followers        Follow[] @relation("UserFollowers")
+  renderJobs       RenderJob[]
+  oauthAccounts    OAuthAccount[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+// ============================================================================
+// GAME SCHEMA
+// ============================================================================
+
+model Game {
+  id                        String   @id @default(uuid())
+  slug                      String   @unique
+  steamAppId                String?  @unique @map("steam_app_id")
+  title                     String
+  description               String
+  thumbnailUrl              String   @map("thumbnail_url")
+  coverImageUrl             String?  @map("cover_image_url")
+  genre                     String[] @default([])
+  rating                    Float?
+  releaseDate               DateTime? @map("release_date")
+  developer                 String?
+  publisher                 String?
+  targetResolution          String?  @map("target_resolution") // '1080p' | '1440p' | '4K'
+  targetFps                 Int?     @map("target_fps") // 60 | 120 | 240
+  bitrateRange              Json?    @map("bitrate_range") // { min: number, max: number }
+  encoderPreset             String?  @map("encoder_preset")
+  maxConcurrentSessionsPerVm Int?   @map("max_concurrent_sessions_per_vm")
+  isFeatured                Boolean  @default(false) @map("is_featured")
+  isNew                     Boolean  @default(false) @map("is_new")
+  releaseStatus             String?  @map("release_status")
+  ageRating                 String?  @map("age_rating")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  sessions                  Session[]
+  clips                     Clip[]
+  liveStreams               LiveStream[]
+
+  @@map("games")
+}
+
+// ============================================================================
+// SESSION SCHEMA
+// ============================================================================
+
+model Session {
+  id              String    @id @default(uuid())
+  userId          String    @map("user_id")
+  gameId          String    @map("game_id")
+  vmId            String?   @map("vm_id")
+  streamUrl       String    @map("stream_url")
+  controlChannelUrl String  @map("control_channel_url")
+  status          String    // 'starting' | 'active' | 'paused' | 'ended' | 'error'
+  region          String
+  deviceInfo      Json?     @map("device_info")
+  networkQuality  String?  @map("network_quality")
+  latencyMs      Int?      @map("latency_ms")
+  startId         String?   @map("start_id") // Legacy field from old schema
+  startedAt       DateTime  @default(now()) @map("started_at")
+  endedAt         DateTime? @map("ended_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// ============================================================================
+// ORCHESTRATOR SCHEMA
+// ============================================================================
+
+model VMTemplate {
+  id                    String   @id @default(uuid())
+  name                  String
+  gpuType               String   @map("gpu_type") // e.g., 'L4-360', 'RTX-4080'
+  vcpu                  Int
+  ramGb                 Int      @map("ram_gb")
+  vramGb                Int      @map("vram_gb")
+  maxConcurrentSessions Int      @map("max_concurrent_sessions")
+  suggestedFpsRange     Json?    @map("suggested_fps_range")
+  suggestedBitrateRange Json?    @map("suggested_bitrate_range")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  vms                   VM[]
+
+  @@map("vm_templates")
+}
+
+model VM {
+  id                String   @id @default(uuid())
+  templateId        String   @map("template_id")
+  region            String
+  status            String   // TEMPLATE | PENDING | PROVISIONING | BOOTING | READY | ASSIGNING_SESSION | IN_USE | RUNNING | DRAINING | TERMINATING | ERROR | TERMINATED
+  currentSessions   Int      @default(0) @map("current_sessions")
+  maxSessions       Int      @map("max_sessions")
+  errorCode         String?  @map("error_code")
+  errorMessage      String?  @map("error_message")
+  lastHeartbeat     DateTime? @map("last_heartbeat") // For health checks
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  template VMTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@map("vms")
+}
+
+// ============================================================================
+// REPLAY SCHEMA
+// ============================================================================
+
+model Replay {
+  id          String    @id @default(uuid())
+  sessionId   String    @map("session_id")
+  userId      String    @map("user_id")
+  gameId      String    @map("game_id")
+  storageUrl  String    @map("storage_url")
+  status      String    // 'processing' | 'ready' | 'failed'
+  fromSeconds Float?    @map("from_seconds")
+  toSeconds   Float?    @map("to_seconds")
+  qualityPreset String? @map("quality_preset")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  renderJobs  RenderJob[]
+
+  @@map("replays")
+}
+
+// ============================================================================
+// VIDEO EDITING SCHEMA
+// ============================================================================
+
+model RenderJob {
+  id            String   @id @default(uuid())
+  replayId      String   @map("replay_id")
+  userId        String   @map("user_id")
+  instructions  Json     // EditInstructionsDTO
+  status        String   // 'QUEUED' | 'PROCESSING' | 'READY' | 'FAILED'
+  videoUrl      String?  @map("video_url")
+  thumbnailUrl  String?  @map("thumbnail_url")
+  reelId        String?  @unique @map("reel_id")
+  progress      Int      @default(0) // 0-100
+  estimatedTime Int?     @map("estimated_time") // seconds
+  errorMessage  String?  @map("error_message")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  completedAt   DateTime? @map("completed_at")
+
+  replay Replay @relation(fields: [replayId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("render_jobs")
+}
+
+// ============================================================================
+// CLIP SCHEMA
+// ============================================================================
+
+model Clip {
+  id              String    @id @default(uuid())
+  title           String?
+  description     String?
+  videoUrl        String    @map("video_url")
+  thumbnailUrl    String    @map("thumbnail_url")
+  gameId          String    @map("game_id")
+  creatorId       String    @map("creator_id")
+  views           Int       @default(0)
+  likes           Int       @default(0)
+  shares          Int       @default(0)
+  comments        Int       @default(0)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  duration        Float     @default(0)
+  status          String    // 'pending' | 'published' | 'hidden'
+  language        String?
+  isReel          Boolean   @default(false) @map("is_reel")
+  reelId          String?   @unique @map("reel_id")
+  musicTrackId    String?   @map("music_track_id")
+  hasCopyrightIssues Boolean @default(false) @map("has_copyright_issues")
+  replayId        String?   @map("replay_id")
+  renderId        String?   @map("render_id")
+
+  game    Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  creator User @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@map("clips")
+}
+
+// ============================================================================
+// LIVE STREAM SCHEMA
+// ============================================================================
+
+model LiveStream {
+  id              String   @id @default(uuid())
+  title           String
+  thumbnailUrl    String   @map("thumbnail_url")
+  streamUrl       String   @map("stream_url")
+  gameId          String   @map("game_id")
+  creatorId       String   @map("creator_id")
+  viewerCount     Int      @default(0) @map("viewer_count")
+  startedAt       DateTime @default(now()) @map("started_at")
+  endedAt         DateTime? @map("ended_at")
+  isLive          Boolean  @default(true) @map("is_live")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  game    Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  creator User @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@map("live_streams")
+}
+
+// ============================================================================
+// CREATOR SCHEMA
+// ============================================================================
+
+model Creator {
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+  handle          String   @unique
+  displayName     String   @map("display_name")
+  avatarUrl       String?  @map("avatar_url")
+  bio             String?
+  followerCount   Int      @default(0) @map("follower_count")
+  followingCount  Int      @default(0) @map("following_count")
+  clipCount       Int      @default(0) @map("clip_count")
+  totalViews      Int      @default(0) @map("total_views")
+  trustScore      Float    @default(0.5) @map("trust_score")
+  qualityScore    Float    @default(0.5) @map("quality_score")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("creators")
+}
+
+model Follow {
+  id          String   @id @default(uuid())
+  followerId  String   @map("follower_id")
+  followingId String   @map("following_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  follower  User @relation("UserFollows", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@map("follows")
+}
+
+// ============================================================================
+// PAYMENT SCHEMA
+// ============================================================================
+
+model Payment {
+  id                    String    @id @default(uuid())
+  userId                String    @map("user_id")
+  planId                String    @map("plan_id")
+  stripeSessionId       String?   @unique @map("stripe_session_id")
+  stripePaymentIntentId String?   @map("stripe_payment_intent_id")
+  amount                Float
+  currency              String    @default("USD")
+  country               String
+  status                String    // 'pending' | 'completed' | 'failed' | 'refunded'
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  completedAt            DateTime? @map("completed_at")
+
+  @@map("payments")
+}
+
+model Wallet {
+  id        String   @id @default(uuid())
+  userId    String   @unique @map("user_id")
+  balance   Float    @default(0)
+  currency  String   @default("USD")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@map("wallets")
+}
+
+model Transaction {
+  id            String   @id @default(uuid())
+  walletId      String   @map("wallet_id")
+  userId        String   @map("user_id")
+  type          String   // 'credit' | 'debit'
+  amount        Float
+  currency      String   @default("USD")
+  description   String?
+  referenceId   String?  @map("reference_id")
+  status        String   // 'pending' | 'completed' | 'failed'
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  user   User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("transactions")
+}
+
+// ============================================================================
+// ANALYTICS SCHEMA
+// ============================================================================
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid())
+  eventType String   @map("event_type") // PageView | SignUp | PlaySessionStart | ReplaySaved | ReelPublished | PaymentCompleted | ClipViewed | LiveStreamViewed
+  userId    String?  @map("user_id")
+  sessionId String?  @map("session_id")
+  metadata  Json?
+  timestamp DateTime @default(now())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("analytics_events")
+}
+
+// ============================================================================
+// MODERATION SCHEMA
+// ============================================================================
+
+model ModerationCheck {
+  id          String   @id @default(uuid())
+  contentId   String   @map("content_id")
+  contentType String  @map("content_type") // 'text' | 'image' | 'video'
+  flagged     Boolean  @default(false)
+  categories  String[] @default([])
+  scores      Json?    // { hate: number, harassment: number, etc. }
+  action      String?  // 'hide' | 'age-restrict' | 'shadowban' | 'manual-review'
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("moderation_checks")
+}
+
+model ContentFlag {
+  id          String   @id @default(uuid())
+  contentId   String   @map("content_id")
+  contentType String   @map("content_type")
+  userId      String   @map("user_id")
+  reason      String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("content_flags")
+}
+
+// ============================================================================
+// COMMUNITY SCHEMA
+// ============================================================================
+
+model CommunityHub {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  iconUrl     String?  @map("icon_url")
+  memberCount Int      @default(0) @map("member_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  members     CommunityHubMember[]
+  channels    CommunityChannel[]
+  events      CommunityEvent[]
+
+  @@map("community_hubs")
+}
+
+model CommunityHubMember {
+  id        String   @id @default(uuid())
+  hubId     String   @map("hub_id")
+  userId    String   @map("user_id")
+  role      String   @default("member") // 'member' | 'moderator' | 'admin'
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  hub CommunityHub @relation(fields: [hubId], references: [id], onDelete: Cascade)
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([hubId, userId])
+  @@map("community_hub_members")
+}
+
+model CommunityChannel {
+  id          String   @id @default(uuid())
+  hubId       String   @map("hub_id")
+  name        String
+  description String?
+  type        String   @default("text") // 'text' | 'voice' | 'announcement'
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  hub CommunityHub @relation(fields: [hubId], references: [id], onDelete: Cascade)
+
+  @@map("community_channels")
+}
+
+model CommunityEvent {
+  id          String   @id @default(uuid())
+  hubId       String   @map("hub_id")
+  title       String
+  description String?
+  startTime   DateTime @map("start_time")
+  endTime     DateTime? @map("end_time")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  hub CommunityHub @relation(fields: [hubId], references: [id], onDelete: Cascade)
+
+  @@map("community_events")
+}
+
+// ============================================================================
+// CHAT SCHEMA
+// ============================================================================
+
+model ChatChannel {
+  id          String   @id @default(uuid())
+  name        String
+  type        String   @default("public") // 'public' | 'private' | 'dm'
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  messages    ChatMessage[]
+  members     ChatChannelMember[]
+
+  @@map("chat_channels")
+}
+
+model ChatMessage {
+  id              String   @id @default(uuid())
+  channelId       String   @map("channel_id")
+  userId          String   @map("user_id")
+  text            String
+  replyToMessageId String? @map("reply_to_message_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  channel ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("chat_messages")
+}
+
+model ChatChannelMember {
+  id          String    @id @default(uuid())
+  channelId   String    @map("channel_id")
+  userId      String    @map("user_id")
+  joinedAt    DateTime  @default(now()) @map("joined_at")
+  lastReadAt  DateTime? @map("last_read_at")
+
+  channel ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@map("chat_channel_members")
+}
+
+// ============================================================================
+// NOTIFICATION SCHEMA
+// ============================================================================
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String   // 'system' | 'social' | 'game' | 'payment'
+  title     String
+  body      String?
+  actionUrl String?  @map("action_url")
+  metadata  Json?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model NotificationDeviceToken {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  deviceToken String   @unique @map("device_token")
+  platform    String   // 'ios' | 'android' | 'web'
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("notification_device_tokens")
+}
+
+// ============================================================================
+// SEO INDEXER SCHEMA
+// ============================================================================
+
+model SitemapCache {
+  id              String   @id @default(uuid())
+  sitemapType     String   @map("sitemap_type") // 'games' | 'creators' | 'landing-pages' | 'index'
+  locale          String
+  content         String   @db.Text
+  lastGeneratedAt DateTime @map("last_generated_at")
+  expiresAt       DateTime @map("expires_at")
+
+  @@unique([sitemapType, locale])
+  @@map("sitemap_cache")
+}
+
+model SEOKeywordCluster {
+  id        String   @id @default(uuid())
+  locale    String
+  category  String
+  keywords  String[] @default([])
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("seo_keyword_clusters")
+}
+
+// ============================================================================
+// CONFIGURATION SCHEMA
+// ============================================================================
+
+model RecommendationConfig {
+  id          String   @id @default(uuid())
+  name        String   @unique // e.g., 'default', 'experiment-a', 'experiment-b'
+  description String?
+  weights     Json     // { w1: number, w2: number, ..., w14: number }
+  isActive    Boolean  @default(false) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("recommendation_configs")
+}
+
+model OAuthProvider {
+  id            String   @id @default(uuid())
+  provider      String   @unique // 'google', 'facebook', 'discord', etc.
+  clientId      String   @map("client_id")
+  clientSecret  String   @map("client_secret")
+  enabled       Boolean  @default(false)
+  scopes        String[] @default([])
+  authUrl       String?  @map("auth_url")
+  tokenUrl      String?  @map("token_url")
+  userInfoUrl   String?  @map("user_info_url")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("oauth_providers")
+}
+
+model OAuthAccount {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  provider      String   // 'google', 'facebook', etc.
+  providerUserId String  @unique @map("provider_user_id")
+  email         String?
+  displayName   String?  @map("display_name")
+  avatarUrl     String?  @map("avatar_url")
+  accessToken   String?  @map("access_token")
+  refreshToken  String?  @map("refresh_token")
+  expiresAt     DateTime? @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("oauth_accounts")
+}
+

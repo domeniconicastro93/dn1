@@ -1,0 +1,25 @@
+{
+  "name": "@strike/game-service",
+  "version": "0.1.0",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastify": "^4.24.0",
+    "@fastify/cors": "^8.4.0",
+    "pg": "^8.11.3",
+    "@strike/shared-types": "workspace:*",
+    "@strike/shared-utils": "workspace:*",
+    "@strike/shared-db": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/pg": "^8.10.9",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

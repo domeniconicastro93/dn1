@@ -1,0 +1,26 @@
+PHASE 5 – ORCHESTRATOR & STREAMING
+
+GOALS:
+- Implement full GPU VM lifecycle:
+    • TEMPLATE
+    • PROVISIONING
+    • BOOTING
+    • READY
+    • IN_USE
+    • DRAINING
+    • ERROR
+    • TERMINATED
+- Implement CreateVM, AssignSession, MarkReady, MarkDraining, HandleError.
+- Implement region fallback.
+- Implement GPU templates (L4-360, A10, A16, 4080, etc.).
+- Implement per-game streaming presets.
+- Implement WebRTC ingest + signaling + control channel.
+- Integrate with session-service.
+
+RULES:
+- Keep logs and metrics.
+- Do NOT start replay buffer yet (next phase).
+- Use events (Kafka/NATS) exactly as defined.
+
+STOP when:
+- A real VM/session can start and stream video to Web/Mobile stub player

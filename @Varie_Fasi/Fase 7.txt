@@ -1,0 +1,17 @@
+PHASE 7 – VIDEO EDITOR ENGINE
+
+GOALS:
+- Implement full JSON → render pipeline.
+- Implement layers, stickers, text, filters, audio ducking.
+- Render 1080x1920 MP4 (H.264 or HEVC).
+- Generate thumbnail.
+- Emit RenderCompleted event.
+- Update clip-service accordingly.
+
+RULES:
+- Use normalized coordinates.
+- Respect safe areas.
+- Keep server scalable.
+
+STOP when:
+- User can create a Reel from a replay
