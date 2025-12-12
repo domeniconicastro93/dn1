@@ -24,3 +24,22 @@ out/
 # OS
 .DS_Store
 Thumbs.db
+# local nested clones / sandboxes
+strike-cloud-gaming/
+
+# deps / build outputs
+**/node_modules/
+**/dist/
+**/.next/
+**/build/
+**/out/
+**/.turbo/
+.pnpm-store/
+
+# env
+**/.env
+**/.env.*
+!.env.example
+
+# emsdk (local toolchain)
+apps/web/public/games/**/emsdk/

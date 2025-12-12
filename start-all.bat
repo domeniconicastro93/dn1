@@ -3,6 +3,7 @@ REM ============================================================================
 REM STRIKE - Start All Services
 REM ============================================================================
 REM Avvia tutti i servizi Strike nell'ordine corretto
+REM AGGIORNATO: Include WebRTC Streaming Service (porta 3015)
 REM ============================================================================
 
 chcp 65001 >nul
@@ -49,29 +50,33 @@ REM Useful absolute path
 set "SCRIPT_DIR=%~dp0"
 set "SCRIPT_DIR=!SCRIPT_DIR:~0,-1!"
 
-echo [1/6] Avvio Auth Service (porta 3001)...
-start /MIN "Strike Auth Service" cmd /c "cd /d "!SCRIPT_DIR!\services\auth-service" && timeout /t 2 /nobreak >nul && pnpm run dev"
+echo [1/7] Avvio WebRTC Streaming Service (porta 3015)...
+start /MIN "Strike WebRTC Streaming" cmd /c "cd /d "!SCRIPT_DIR!\services\webrtc-streaming-service" && pnpm run dev"
+timeout /t 5 /nobreak >nul
+
+echo [2/7] Avvio Auth Service (porta 3001)...
+start /MIN "Strike Auth Service" cmd /c "cd /d "!SCRIPT_DIR!\services\auth-service" && pnpm run dev"
+timeout /t 5 /nobreak >nul
+
+echo [3/7] Avvio Game Service (porta 3003)...
+start /MIN "Strike Game Service" cmd /c "cd /d "!SCRIPT_DIR!\services\game-service" && pnpm run dev"
 timeout /t 3 /nobreak >nul
 
-echo [2/6] Avvio Game Service (porta 3003)...
-start /MIN "Strike Game Service" cmd /c "cd /d "!SCRIPT_DIR!\services\game-service" && pnpm run dev"
-timeout /t 2 /nobreak >nul
-
-echo [3/6] Avvio Steam Library Service (porta 3022)...
+echo [4/7] Avvio Steam Library Service (porta 3022)...
 start /MIN "Strike Steam Library Service" cmd /c "cd /d "!SCRIPT_DIR!\services\steam-library-service" && pnpm run dev"
-timeout /t 2 /nobreak >nul
+timeout /t 3 /nobreak >nul
 
-echo [4/6] Avvio Orchestrator Service (porta 3012)...
+echo [5/7] Avvio Orchestrator Service (porta 3012)...
 start /MIN "Strike Orchestrator Service" cmd /c "cd /d "!SCRIPT_DIR!\services\orchestrator-service" && pnpm run dev"
-timeout /t 2 /nobreak >nul
+timeout /t 3 /nobreak >nul
 
-echo [5/6] Avvio Gateway Service (porta 3000)...
+echo [6/7] Avvio Gateway Service (porta 3000)...
 start /MIN "Strike Gateway Service" cmd /c "cd /d "!SCRIPT_DIR!\services\gateway-service" && pnpm run dev"
-timeout /t 2 /nobreak >nul
+timeout /t 3 /nobreak >nul
 
-echo [6/6] Avvio Web App (porta 3005)...
+echo [7/7] Avvio Web App (porta 3005)...
 start "Strike Web App" cmd /k "cd /d "!SCRIPT_DIR!\apps\web" && pnpm run dev"
-timeout /t 5 /nobreak >nul
+timeout /t 8 /nobreak >nul
 
 echo.
 echo [OK] Tutti i servizi avviati!
@@ -84,6 +89,13 @@ echo [STEP 3/3] Verifica servizi...
 echo.
 
 timeout /t 5 /nobreak >nul
+
+netstat -ano | findstr ":3015 " >nul 2>&1
+if %ERRORLEVEL% EQU 0 (
+    echo [OK] WebRTC Streaming   - http://localhost:3015
+) else (
+    echo [WARNING] WebRTC Streaming Service non risponde
+)
 
 netstat -ano | findstr ":3001 " >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
@@ -135,8 +147,10 @@ echo.
 echo   URL Principali:
 echo   - Web App:        http://localhost:3005
 echo   - Games Page:     http://localhost:3005/it/games
+echo   - Test Stream:    http://localhost:3005/it/test-stream
 echo   - Gateway API:    http://localhost:3000/health
 echo   - Orchestrator:   http://localhost:3012/health
+echo   - WebRTC Stream:  http://localhost:3015/health
 echo.
 echo   Per fermare tutti i servizi: stop-all.bat
 echo.

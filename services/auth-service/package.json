@@ -9,6 +9,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "dotenv": "^16.3.1",
     "fastify": "^4.24.0",
     "@fastify/cors": "^8.4.0",
     "@fastify/cookie": "^8.3.0",
