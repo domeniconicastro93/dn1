@@ -125,12 +125,22 @@ export interface SessionStartResponse {
         /** ICE servers */
         iceServers: RTCIceServer[];
         /** WebRTC offer (if available) */
-        offer?: RTCSessionDescriptionInit;
+        offer?: any;
     };
     /** App ID */
     appId: string;
     /** Steam App ID */
     steamAppId?: string;
+
+    // MOONLIGHT CLIENT COMPATIBILITY
+    /** Host (alias for sunshineHost) */
+    host: string;
+    /** Port (alias for sunshinePort) */
+    port: number;
+    /** Use HTTPS */
+    useHttps: boolean;
+    /** UDP ports for streaming */
+    udpPorts: number[];
 }
 
 /**

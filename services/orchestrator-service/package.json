@@ -9,12 +9,21 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "fastify": "^4.24.0",
     "@fastify/cors": "^8.4.0",
-    "pg": "^8.11.3",
+    "@fastify/websocket": "^8.3.1",
+    "@strike/shared-db": "workspace:*",
     "@strike/shared-types": "workspace:*",
     "@strike/shared-utils": "workspace:*",
-    "@strike/shared-db": "workspace:*"
+    "@types/node-fetch": "^2.6.13",
+    "@types/socket.io": "^3.0.2",
+    "@types/uuid": "^11.0.0",
+    "dotenv": "^16.3.1",
+    "fastify": "^4.24.0",
+    "node-fetch": "^2.7.0",
+    "pg": "^8.11.3",
+    "socket.io": "^4.8.1",
+    "uuid": "^13.0.0",
+    "websockify": "^0.7.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

@@ -1,0 +1,35 @@
+{
+    "name": "@strike/webrtc-streaming-service",
+    "version": "0.1.0",
+    "description": "WebRTC streaming service for Strike Cloud Gaming",
+    "main": "dist/index.js",
+    "scripts": {
+        "dev": "tsx watch src/index.ts",
+        "build": "tsc",
+        "start": "node dist/index.js"
+    },
+    "keywords": [
+        "webrtc",
+        "streaming",
+        "cloud-gaming",
+        "ffmpeg"
+    ],
+    "author": "Strike Cloud Gaming",
+    "license": "MIT",
+    "dependencies": {
+        "@fastify/cors": "^8.4.2",
+        "@fastify/websocket": "^8.3.1",
+        "fastify": "^4.25.2",
+        "fluent-ffmpeg": "^2.1.2",
+        "pino": "^8.17.2",
+        "pino-pretty": "^10.3.1",
+        "socket.io": "^4.6.1",
+        "werift": "^0.22.2"
+    },
+    "devDependencies": {
+        "@types/fluent-ffmpeg": "^2.1.24",
+        "@types/node": "^20.10.6",
+        "tsx": "^4.7.0",
+        "typescript": "^5.3.3"
+    }
+}

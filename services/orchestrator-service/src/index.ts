@@ -47,11 +47,13 @@ import {
 } from './events';
 import { getOrchestratorMetrics } from './metrics';
 import { prisma } from '@strike/shared-db';
-import { getSunshineClient, SunshineConnectionError, type SunshineApplication } from './sunshine-client';
+import { getSunshineClient, createSunshineClient, SunshineConnectionError, type SunshineApplication } from './sunshine-client';
 import { mapSteamToSunshine } from './sunshine-mapper';
 import { checkSunshineHealth } from './sunshine-health';
 import type { SteamLibraryResponseDTO, SteamInstalledGameDTO } from '@strike/shared-types';
 import { getSunshinePairingClient } from './core/sunshine-pairing-client';
+import { getWebRTCClient } from './core/webrtc-client';
+import { getVMAgentClient } from './core/vm-agent-client';
 
 const app = Fastify({
   logger: true,
@@ -65,6 +67,9 @@ app.register(cors as any, {
 
 import { startHealthMonitoring } from './health-monitor';
 import { registerSessionRoutes } from './routes/session';
+import { vncProxyRoutes } from './routes/vnc-proxy';
+import { setupSignalingServer } from './webrtc/signaling-server';
+
 
 
 const start = async () => {
@@ -114,15 +119,45 @@ const start = async () => {
       });
     });
 
+    // Debug endpoint for environment variables
+    app.get('/test/env', async (request, reply) => {
+      return reply.status(200).send({
+        SUNSHINE_URL: process.env.SUNSHINE_URL,
+        SUNSHINE_PORT: process.env.SUNSHINE_PORT,
+        SUNSHINE_USE_HTTPS: process.env.SUNSHINE_USE_HTTPS,
+        SUNSHINE_VERIFY_SSL: process.env.SUNSHINE_VERIFY_SSL,
+        SUNSHINE_TIMEOUT: process.env.SUNSHINE_TIMEOUT,
+        SUNSHINE_USERNAME: process.env.SUNSHINE_USERNAME,
+        SUNSHINE_PASSWORD: process.env.SUNSHINE_PASSWORD ? '***' : undefined,
+        ORCHESTRATOR_SUNSHINE_HOST: process.env.ORCHESTRATOR_SUNSHINE_HOST,
+        ORCHESTRATOR_SUNSHINE_PORT: process.env.ORCHESTRATOR_SUNSHINE_PORT,
+        ORCHESTRATOR_SUNSHINE_USE_HTTPS: process.env.ORCHESTRATOR_SUNSHINE_USE_HTTPS,
+      });
+    });
+
     // Test endpoint for Sunshine connectivity
     app.get('/test/sunshine', async (request, reply) => {
       try {
-        const sunshineHost = process.env.ORCHESTRATOR_SUNSHINE_HOST || '20.31.130.73';
-        const sunshinePort = parseInt(process.env.ORCHESTRATOR_SUNSHINE_PORT || '47985', 10);
+        const sunshineHost = process.env.SUNSHINE_URL || process.env.ORCHESTRATOR_SUNSHINE_HOST || '20.31.130.73';
+        const sunshinePort = parseInt(process.env.SUNSHINE_PORT || process.env.ORCHESTRATOR_SUNSHINE_PORT || '47990', 10);
+        const useHttps = process.env.SUNSHINE_USE_HTTPS === 'true' || process.env.ORCHESTRATOR_SUNSHINE_USE_HTTPS === 'true';
+        const verifySsl = process.env.SUNSHINE_VERIFY_SSL !== 'false';
+        const timeout = parseInt(process.env.SUNSHINE_TIMEOUT || '300000', 10);
 
-        app.log.info(`[TEST] Testing Sunshine connection to ${sunshineHost}:${sunshinePort}`);
+        app.log.info(`[TEST] Testing Sunshine connection to ${sunshineHost}:${sunshinePort} (timeout: ${timeout}ms)`);
 
-        const sunshineClient = getSunshineClient(sunshineHost);
+        const sunshineClient = createSunshineClient({
+          url: sunshineHost,
+          port: sunshinePort,
+          username: process.env.SUNSHINE_USERNAME || 'strike',
+          password: process.env.SUNSHINE_PASSWORD || '',
+          useHttps,
+          verifySsl,
+          timeout,
+        });
+
+        app.log.info(`[TEST] Sunshine client config: url=${sunshineHost}, port=${sunshinePort}, useHttps=${useHttps}, timeout=${timeout}ms`);
+
         const connectionTest = await sunshineClient.testConnection();
 
         if (connectionTest.connected) {
@@ -134,6 +169,7 @@ const start = async () => {
             message: 'Sunshine is reachable',
           }));
         } else {
+          // @ts-ignore
           app.log.error('[TEST] Sunshine connection failed:', connectionTest.error);
           return reply.status(500).send(errorResponse(
             ErrorCodes.INTERNAL_ERROR,
@@ -142,6 +178,7 @@ const start = async () => {
           ));
         }
       } catch (error) {
+        // @ts-ignore
         app.log.error('[TEST] Exception testing Sunshine:', error);
         return reply.status(500).send(errorResponse(
           ErrorCodes.INTERNAL_ERROR,
@@ -180,6 +217,7 @@ const start = async () => {
             message: 'Sunshine pairing successful',
           }));
         } else {
+          // @ts-ignore
           app.log.error('[TEST PAIRING] Pairing failed:', pairingResult.error);
           return reply.status(500).send(errorResponse(
             ErrorCodes.INTERNAL_ERROR,
@@ -188,6 +226,7 @@ const start = async () => {
           ));
         }
       } catch (error) {
+        // @ts-ignore
         app.log.error('[TEST PAIRING] Exception during pairing:', error);
         return reply.status(500).send(errorResponse(
           ErrorCodes.INTERNAL_ERROR,
@@ -201,57 +240,94 @@ const start = async () => {
     app.get('/test/sunshine/launch', async (request, reply) => {
       try {
         const sunshineHost = process.env.SUNSHINE_URL || '20.31.130.73';
-        const sunshinePort = parseInt(process.env.SUNSHINE_PORT || '47985', 10);
+        const sunshinePort = parseInt(process.env.SUNSHINE_PORT || '47990', 10);
         const useHttps = process.env.SUNSHINE_USE_HTTPS === 'true';
         const username = process.env.SUNSHINE_USERNAME || 'strike';
         const password = process.env.SUNSHINE_PASSWORD || '';
-        const steamAppId = '1515950'; // Capcom Arcade Stadium
 
         app.log.info(`[TEST LAUNCH] Testing game launch to ${sunshineHost}:${sunshinePort}`);
 
-        const protocol = useHttps ? 'https' : 'http';
-        const url = `${protocol}://${sunshineHost}:${sunshinePort}/api/launch`;
+        // Use the first available app (index 0)
+        const appIndex = 0;
 
-        const credentials = Buffer.from(`${username}:${password}`).toString('base64');
+        return new Promise((resolve, reject) => {
+          const https = require('https');
+          const http = require('http');
+          const httpModule = useHttps ? https : http;
 
-        const https = await import('https');
-        const httpsAgent = useHttps ? new https.Agent({
-          rejectUnauthorized: false,
-        }) : undefined;
+          const credentials = Buffer.from(`${username}:${password}`).toString('base64');
+          const postData = JSON.stringify({ index: appIndex });
 
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Basic ${credentials}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            app: `steam://rungameid/${steamAppId}`,
-          }),
-          ...(httpsAgent && { agent: httpsAgent }),
+          const options = {
+            hostname: sunshineHost,
+            port: sunshinePort,
+            path: '/api/launch',
+            method: 'POST',
+            headers: {
+              'Authorization': `Basic ${credentials}`,
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(postData),
+            },
+            rejectUnauthorized: false,
+            timeout: 30000,
+          };
+
+          const req = httpModule.request(options, (res: any) => {
+            let data = '';
+
+            res.on('data', (chunk: any) => {
+              data += chunk;
+            });
+
+            res.on('end', () => {
+              app.log.info(`[TEST LAUNCH] Response status: ${res.statusCode}`);
+              app.log.info(`[TEST LAUNCH] Response body: ${data}`);
+
+              if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                app.log.info('[TEST LAUNCH] Launch successful!');
+                resolve(reply.status(200).send(successResponse({
+                  success: true,
+                  appIndex,
+                  response: data,
+                  message: 'Game launch successful',
+                })));
+              } else {
+                // @ts-ignore
+                app.log.error('[TEST LAUNCH] Launch failed:', data);
+                resolve(reply.status(500).send(errorResponse(
+                  ErrorCodes.INTERNAL_ERROR,
+                  'Game launch failed',
+                  { status: res.statusCode, response: data }
+                )));
+              }
+            });
+          });
+
+          req.on('error', (error: Error) => {
+            // @ts-ignore
+            app.log.error('[TEST LAUNCH] Exception during launch:', error);
+            resolve(reply.status(500).send(errorResponse(
+              ErrorCodes.INTERNAL_ERROR,
+              'Error testing game launch',
+              { error: error.message }
+            )));
+          });
+
+          req.on('timeout', () => {
+            req.destroy();
+            app.log.error('[TEST LAUNCH] Request timed out');
+            resolve(reply.status(500).send(errorResponse(
+              ErrorCodes.INTERNAL_ERROR,
+              'Game launch request timed out',
+              { timeout: 30000 }
+            )));
+          });
+
+          req.write(postData);
+          req.end();
         });
-
-        const responseText = await response.text();
-        app.log.info(`[TEST LAUNCH] Response status: ${response.status}`);
-        app.log.info(`[TEST LAUNCH] Response body: ${responseText}`);
-
-        if (response.ok) {
-          app.log.info('[TEST LAUNCH] Launch successful!');
-          return reply.status(200).send(successResponse({
-            success: true,
-            steamAppId,
-            response: responseText,
-            message: 'Game launch successful',
-          }));
-        } else {
-          app.log.error('[TEST LAUNCH] Launch failed:', responseText);
-          return reply.status(500).send(errorResponse(
-            ErrorCodes.INTERNAL_ERROR,
-            'Game launch failed',
-            { status: response.status, response: responseText }
-          ));
-        }
       } catch (error) {
+        // @ts-ignore
         app.log.error('[TEST LAUNCH] Exception during launch:', error);
         return reply.status(500).send(errorResponse(
           ErrorCodes.INTERNAL_ERROR,
@@ -346,6 +422,7 @@ const start = async () => {
           results,
         }));
       } catch (error) {
+        // @ts-ignore
         app.log.error('[TEST FORMATS] Exception:', error);
         return reply.status(500).send(errorResponse(
           ErrorCodes.INTERNAL_ERROR,
@@ -358,6 +435,15 @@ const start = async () => {
     // Register session routes
     registerSessionRoutes(app);
     app.log.info('Session routes registered');
+
+    // Register VNC proxy routes (DISABLED - using Apollo + WebRTC instead)
+    // await vncProxyRoutes(app);
+    // app.log.info('VNC proxy routes registered');
+    console.log('[ORCHESTRATOR] VNC proxy disabled - using Apollo + WebRTC');
+
+    // Setup WebRTC signaling server
+    setupSignalingServer(app);
+    app.log.info('WebRTC signaling server initialized');
 
     await app.listen({ port: PORT, host: HOST });
     app.log.info(`Orchestrator service listening on ${HOST}:${PORT}`);
@@ -1258,6 +1344,101 @@ app.get(
           error instanceof Error ? error.message : 'Failed to fetch compute status'
         )
       );
+    }
+  }
+);
+
+// ============================================================================
+// ✅ NEW: WebRTC Session Lifecycle Endpoints
+// ============================================================================
+
+const webrtcClient = getWebRTCClient();
+
+/**
+ * POST /api/orchestrator/v1/webrtc/session/start
+ * Start WebRTC streaming session
+ */
+app.post<{ Body: { gameId?: string; steamAppId?: number | string } }>(
+  '/api/orchestrator/v1/webrtc/session/start',
+  { preHandler: [rateLimitMiddleware] },
+  async (request, reply) => {
+    try {
+      const sessionId = require('crypto').randomUUID();
+      console.log('[Orchestrator] Starting WebRTC session:', sessionId);
+
+      const { offer } = await webrtcClient.startSession(sessionId);
+
+      console.log('[Orchestrator] ✅ Offer received');
+      return reply.status(200).send(successResponse({ sessionId, offer }));
+    } catch (error) {
+      console.error('[Orchestrator] WebRTC start error:', error);
+      return reply.status(500).send(errorResponse(ErrorCodes.INTERNAL_ERROR, 'WebRTC start failed'));
+    }
+  }
+);
+
+/**
+ * POST /api/orchestrator/v1/webrtc/session/answer
+ */
+app.post<{ Body: { sessionId: string; answer: any } }>(
+  '/api/orchestrator/v1/webrtc/session/answer',
+  { preHandler: [rateLimitMiddleware] },
+  async (request, reply) => {
+    try {
+      const { sessionId, answer } = request.body;
+      console.log('[Orchestrator] Forwarding answer:', sessionId);
+
+      await webrtcClient.sendAnswer(sessionId, answer);
+
+      console.log('[Orchestrator] ✅ Answer forwarded');
+      return reply.status(200).send(successResponse({ success: true }));
+    } catch (error) {
+      console.error('[Orchestrator] Answer forward error:', error);
+      return reply.status(500).send(errorResponse(ErrorCodes.INTERNAL_ERROR, 'Answer forward failed'));
+    }
+  }
+);
+
+/**
+ * POST /api/orchestrator/v1/webrtc/session/ice
+ */
+app.post<{ Body: { sessionId: string; candidate: any } }>(
+  '/api/orchestrator/v1/webrtc/session/ice',
+  { preHandler: [rateLimitMiddleware] },
+  async (request, reply) => {
+    try {
+      const { sessionId, candidate } = request.body;
+      console.log('[Orchestrator] Forwarding ICE:', sessionId);
+
+      await webrtcClient.sendIceCandidate(sessionId, candidate);
+
+      console.log('[Orchestrator] ✅ ICE forwarded');
+      return reply.status(200).send(successResponse({ success: true }));
+    } catch (error) {
+      console.error('[Orchestrator] ICE forward error:', error);
+      return reply.status(500).send(errorResponse(ErrorCodes.INTERNAL_ERROR, 'ICE forward failed'));
+    }
+  }
+);
+
+/**
+ * POST /api/orchestrator/v1/webrtc/session/stop
+ */
+app.post<{ Body: { sessionId: string } }>(
+  '/api/orchestrator/v1/webrtc/session/stop',
+  { preHandler: [rateLimitMiddleware] },
+  async (request, reply) => {
+    try {
+      const { sessionId } = request.body;
+      console.log('[Orchestrator] Stopping session:', sessionId);
+
+      await webrtcClient.stopSession(sessionId);
+
+      console.log('[Orchestrator] ✅ Session stopped');
+      return reply.status(200).send(successResponse({ success: true }));
+    } catch (error) {
+      console.error('[Orchestrator] Stop error:', error);
+      return reply.status(500).send(errorResponse(ErrorCodes.INTERNAL_ERROR, 'Stop failed'));
     }
   }
 );

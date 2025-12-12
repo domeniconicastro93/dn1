@@ -1,13 +1,19 @@
 /**
  * Session Manager - Core Session Orchestration
  * 
- * Phase 11.A3: Real Sunshine integration with session lifecycle
+ * ⚠️ DEPRECATED: Sunshine and Apollo integration
+ * 
+ * This file previously integrated with Sunshine and Apollo for game streaming.
+ * These systems have been REPLACED by the new WebRTC Streaming Service.
+ * 
+ * TODO: Remove all Sunshine/Apollo code and integrate with WebRTC service at:
+ *       services/webrtc-streaming-service (port 3015)
  * 
  * Responsibilities:
  * - Create/start sessions
  * - Monitor session status
  * - Stop/cleanup sessions
- * - Coordinate VM allocation and Sunshine client
+ * - Coordinate VM allocation and WebRTC streaming
  */
 
 import { randomUUID } from 'crypto';
@@ -21,7 +27,16 @@ import type {
     SessionStopResponse,
 } from '../types/webrtc';
 import { getVMProvider, type VMInfo } from './vm-provider';
-import { createSunshineClient, type SunshineClient } from './sunshine-client';
+
+// ❌ DEPRECATED: Sunshine integration removed
+// import { createSunshineClient, type SunshineClient } from './sunshine-client';
+
+// ❌ DEPRECATED: Apollo integration removed  
+// import { createApolloClient, type ApolloClient } from '../apollo/apollo-client';
+
+// Stub types for backward compatibility during migration
+type SunshineClient = any;
+type ApolloClient = any;
 
 /**
  * In-memory session store
@@ -93,20 +108,29 @@ export class SessionManager {
 
     /**
      * Get or create Sunshine client for a VM
+     * 
+     * ❌ DEPRECATED: Sunshine integration removed
+     * This method now returns null. Use WebRTC service instead.
      */
     private getSunshineClient(vmHost: string): SunshineClient {
-        if (!this.sunshineClients.has(vmHost)) {
-            const client = createSunshineClient({ host: vmHost });
-            this.sunshineClients.set(vmHost, client);
-        }
-        return this.sunshineClients.get(vmHost)!;
+        // ❌ DEPRECATED: Sunshine removed
+        // TODO: Replace with WebRTC service integration
+        return null as any;
     }
 
     /**
      * Start status polling for a session
+     * 
+     * ❌ DEPRECATED: Disabled because Sunshine/Apollo are removed
+     * WebRTC sessions don't need polling - they use connection state events
      */
     private startStatusPolling(sessionId: string, vmHost: string): void {
-        // Poll every 2 seconds
+        // ❌ DISABLED: Sunshine polling removed
+        // WebRTC sessions handle their own connection state
+        console.log('[SessionManager] ⚠️ Status polling disabled (Sunshine deprecated)');
+        return;
+
+        /* DEPRECATED CODE - Kept for reference
         const interval = setInterval(async () => {
             try {
                 const session = this.sessionStore.get(sessionId);
@@ -118,7 +142,6 @@ export class SessionManager {
                 const client = this.getSunshineClient(vmHost);
                 const status = await client.getSessionStatus(sessionId);
 
-                // Update session state if needed
                 if (!status.active && session.state === 'ACTIVE') {
                     console.log('[SessionManager] Session became inactive:', sessionId);
                     session.state = 'ERROR';
@@ -137,6 +160,7 @@ export class SessionManager {
 
         this.statusPollers.set(sessionId, interval);
         console.log('[SessionManager] Started status polling for session:', sessionId);
+        */
     }
 
     /**
@@ -188,40 +212,48 @@ export class SessionManager {
         const sessionId = randomUUID();
         console.log('[SessionManager] STEP 2: Session ID created:', sessionId);
 
-        // STEP 3: Get Sunshine client
-        console.log('[SessionManager] STEP 3: Getting Sunshine client...');
-        const sunshineClient = this.getSunshineClient(vm.host);
 
-        // STEP 4: Authenticate with Sunshine
-        console.log('[SessionManager] STEP 4: Authenticating with Sunshine...');
-        try {
-            const authResult = await sunshineClient.login();
-            console.log('[SessionManager] ✅ Sunshine authenticated:', authResult.authenticated);
-            console.log('[SessionManager]    Version:', authResult.version);
-            console.log('[SessionManager]    Apps:', authResult.apps?.length || 0);
-        } catch (error) {
-            console.error('[SessionManager] ❌ Sunshine authentication failed:', error);
-            // Release VM
-            await this.vmProvider.releaseVM(vm.id, sessionId);
-            throw new Error(`Failed to authenticate with Sunshine: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
+        // STEP 3: Skip Sunshine client initialization
+        // Moonlight will connect directly to Sunshine
+        console.log('[SessionManager] STEP 3: Skipping Sunshine client (Moonlight handles connection)');
 
-        // STEP 5: Launch game
-        if (steamAppId) {
-            console.log('[SessionManager] STEP 5: Launching game...');
-            console.log('[SessionManager]    Steam App ID:', steamAppId);
-            try {
-                await sunshineClient.launchSteamGame(steamAppId);
-                console.log('[SessionManager] ✅ Game launched successfully');
-            } catch (error) {
-                console.error('[SessionManager] ❌ Game launch failed:', error);
-                // Release VM
-                await this.vmProvider.releaseVM(vm.id, sessionId);
-                throw new Error(`Failed to launch game: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            }
+        // STEP 4: Skip authentication
+        // With pairing bypass (require_pairing=false), Moonlight connects directly
+        console.log('[SessionManager] STEP 4: Skipping Sunshine authentication (pairing bypassed)');
+
+        // STEP 5: Launch game on Apollo
+        console.log('[SessionManager] STEP 5: Launching game on Apollo...');
+
+        // Map gameId to Apollo app name
+        const gameToApolloApp: Record<string, string> = {
+            'c215d61e-df8b-4f3c-b23e-3bc999c5f7da': 'CapcomArcadeStadium', // Capcom Arcade Stadium
+            'steam': 'Steam',
+            'steam-big-picture': 'Steam'
+        };
+
+        const apolloAppName = gameToApolloApp[appId] || 'CapcomArcadeStadium';
+        console.log(`[SessionManager] Mapped appId ${appId} → Apollo app: ${apolloAppName}`);
+
+        // ❌ DEPRECATED: Apollo integration removed
+        // TODO: Replace with WebRTC service game launch
+        /*
+        const apolloClient = createApolloClient();
+        const launchResult = await apolloClient.launchApp(apolloAppName);
+
+        if (!launchResult.success) {
+            console.error(`[SessionManager] Failed to launch game on Apollo:`, launchResult.error);
+            // Continue anyway - game might already be running
+            console.log('[SessionManager] Continuing despite launch error (game might be running)');
         } else {
-            console.log('[SessionManager] STEP 5: No Steam App ID provided, skipping game launch');
+            console.log(`[SessionManager] ✅ Game launched successfully on Apollo`);
         }
+        */
+        console.log('[SessionManager] ⚠️ Apollo integration disabled - using WebRTC service');
+
+        // Wait a bit for the game to start
+        console.log('[SessionManager] Waiting 2 seconds for game to initialize...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
 
         // STEP 6: Create session object
         console.log('[SessionManager] STEP 6: Creating session object...');
@@ -272,6 +304,12 @@ export class SessionManager {
             },
             appId,
             steamAppId,
+
+            // MOONLIGHT CLIENT COMPATIBILITY (now NoVNC)
+            host: vm.host,
+            port: 5900, // TightVNC port for NoVNC streaming
+            useHttps: false, // VNC doesn't use HTTPS
+            udpPorts: [], // VNC uses TCP only
         };
 
         console.log('[SessionManager] ========================================');

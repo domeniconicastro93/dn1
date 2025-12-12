@@ -14,8 +14,9 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         console.log('[Play Start API] Request body:', body);
 
-        const gatewayUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-        const targetUrl = `${gatewayUrl}/api/play/start`;
+        // Call Orchestrator directly instead of Gateway
+        const orchestratorUrl = process.env.ORCHESTRATOR_URL || 'http://localhost:3012';
+        const targetUrl = `${orchestratorUrl}/api/sessions/request`;
 
         console.log('[Play Start API] Calling gateway:', targetUrl);
 

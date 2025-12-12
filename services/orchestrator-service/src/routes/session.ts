@@ -1,16 +1,14 @@
 /**
  * Session Management Routes for Orchestrator Service
  * 
- * Phase 11.A3: Real session lifecycle with Sunshine integration
- * 
- * Handles complete gameplay session lifecycle:
- * - Session start (VM allocation + game launch)
- * - Session status monitoring
- * - Session stop (cleanup)
+ * ✅ UPDATED: Uses centralized WebRTC client
+ * Single source of truth for WebRTC session management
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { successResponse, errorResponse, ErrorCodes } from '@strike/shared-utils';
+import { getWebRTCClient } from '../core/webrtc-client';
+import { getVMAgentClient } from '../core/vm-agent-client';
 import { getSessionManager } from '../core/session-manager';
 import type {
     SessionStartRequest,
@@ -21,26 +19,29 @@ interface SessionStatusParams {
     sessionId: string;
 }
 
+// Configuration
+const LAUNCH_DELAY_MS = parseInt(process.env.LAUNCH_DELAY_MS || '1500', 10);
+
 /**
  * Register session routes
  */
 export function registerSessionRoutes(app: FastifyInstance) {
-    const sessionManager = getSessionManager();
+    const webrtcClient = getWebRTCClient();
+    const vmAgentClient = getVMAgentClient(); // VM Agent for game launch
+    const sessionManager = getSessionManager(); // For status/stop endpoints
 
     /**
      * POST /api/orchestrator/v1/session/start
      * 
-     * Start a new cloud gaming session
+     * Start a new cloud gaming session using WebRTC
+     * ✅ UPDATED: Uses shared WebRTC client (single source of truth)
      */
     app.post<{ Body: SessionStartRequest }>(
         '/api/orchestrator/v1/session/start',
         async (request: FastifyRequest<{ Body: SessionStartRequest }>, reply: FastifyReply) => {
-            // DEBUG: Log the raw request body
-            console.log('[DEBUG Session Body]', request.body);
-
             const { userId, appId, steamAppId } = request.body;
 
-            app.log.info({ userId, appId, steamAppId }, 'Session start requested');
+            app.log.info({ userId, appId, steamAppId }, 'Session start requested (WebRTC)');
 
             if (!userId || !appId) {
                 return reply.status(400).send(
@@ -49,21 +50,128 @@ export function registerSessionRoutes(app: FastifyInstance) {
             }
 
             try {
-                const response = await sessionManager.startSession({
-                    userId,
-                    appId,
-                    steamAppId,
-                    deviceInfo: {
-                        userAgent: request.headers['user-agent'],
-                        platform: 'web',
-                    },
-                });
+                // Generate session ID
+                const sessionId = require('crypto').randomUUID();
 
-                app.log.info({ sessionId: response.sessionId }, 'Session started successfully');
+                console.log('[SessionRoute] Starting full Play Now flow for session:', sessionId);
 
-                return reply.status(200).send(successResponse(response));
+                // STEP 1: Check VM Agent health (fail fast)
+                console.log('[SessionRoute] Step 1: Checking VM Agent health...');
+                const health = await vmAgentClient.health();
+
+                if (!health.ok) {
+                    console.error('[SessionRoute] ❌ VM Agent health check failed:', health.error);
+                    return reply.status(503).send(
+                        errorResponse(
+                            ErrorCodes.SERVICE_UNAVAILABLE,
+                            `VM Agent unavailable: ${health.error || 'Unknown error'}`
+                        )
+                    );
+                }
+
+                console.log('[SessionRoute] ✅ VM Agent healthy:', health.hostname);
+
+                // STEP 2: Launch Steam game (if steamAppId provided)
+                if (steamAppId) {
+                    console.log('[SessionRoute] Step 2: Launching Steam game:', steamAppId);
+
+                    const launchResult = await vmAgentClient.launchGame(steamAppId);
+
+                    if (!launchResult.ok) {
+                        console.error('[SessionRoute] ❌ Game launch failed:', launchResult.error);
+                        return reply.status(500).send(
+                            errorResponse(
+                                ErrorCodes.INTERNAL_ERROR,
+                                `Failed to launch game: ${launchResult.error || 'Unknown error'}`
+                            )
+                        );
+                    }
+
+                    console.log('[SessionRoute] ✅ Game launched successfully');
+
+                    // STEP 3: Wait for game to initialize
+                    console.log(`[SessionRoute] Step 3: Waiting ${LAUNCH_DELAY_MS}ms for game initialization...`);
+                    await new Promise(resolve => setTimeout(resolve, LAUNCH_DELAY_MS));
+                } else {
+                    console.log('[SessionRoute] No steamAppId provided, skipping game launch');
+                }
+
+                // STEP 4: Start WebRTC stream capture
+                console.log('[SessionRoute] Step 4: Starting WebRTC stream capture...');
+                const { offer } = await webrtcClient.startSession(sessionId);
+
+                console.log('[SessionRoute] ✅ Complete Play Now flow successful!');
+
+                // Return WebRTC session info
+                return reply.status(200).send(
+                    successResponse({
+                        sessionId,
+                        offer,
+                        streamingServiceUrl: webrtcClient.getServiceUrl(),
+                        webrtc: {
+                            signalingUrl: `${process.env.ORCHESTRATOR_URL || 'http://localhost:3012'}/api/orchestrator/v1/webrtc`,
+                        },
+                        vmAgent: {
+                            hostname: health.hostname,
+                            launched: !!steamAppId
+                        }
+                    })
+                );
             } catch (error) {
-                app.log.error({ error }, 'Error starting session');
+                app.log.error({ error }, 'Error in Play Now flow');
+                return reply.status(500).send(
+                    errorResponse(
+                        ErrorCodes.INTERNAL_ERROR,
+                        `Failed to start session: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    )
+                );
+            }
+        }
+    );
+
+    /**
+     * POST /api/sessions/request
+     * 
+     * ALIAS for /api/orchestrator/v1/session/start (for frontend compatibility)
+     * ✅ UPDATED: Uses shared WebRTC client
+     */
+    app.post<{ Body: SessionStartRequest }>(
+        '/api/sessions/request',
+        async (request: FastifyRequest<{ Body: SessionStartRequest }>, reply: FastifyReply) => {
+            const { userId, appId, steamAppId } = request.body;
+
+            app.log.info({ userId, appId, steamAppId }, 'Session request (alias, WebRTC)');
+
+            if (!userId || !appId) {
+                return reply.status(400).send(
+                    errorResponse(ErrorCodes.VALIDATION_ERROR, 'userId and appId are required')
+                );
+            }
+
+            try {
+                // Generate session ID
+                const sessionId = require('crypto').randomUUID();
+
+                console.log('[SessionRoute/Alias] Starting WebRTC session:', sessionId);
+
+                // Use shared WebRTC client (same as main endpoint)
+                const { offer } = await webrtcClient.startSession(sessionId);
+
+                console.log('[SessionRoute/Alias] ✅ WebRTC session created');
+
+                // Return WebRTC session info
+                return reply.status(200).send(
+                    successResponse({
+                        sessionId,
+                        offer,
+                        streamingServiceUrl: webrtcClient.getServiceUrl(),
+                        webrtc: {
+                            signalingUrl: `${process.env.ORCHESTRATOR_URL || 'http://localhost:3012'}/api/orchestrator/v1/webrtc`,
+                        },
+                    })
+                );
+            } catch (error) {
+                app.log.error({ error }, 'Error starting WebRTC session (alias)');
                 return reply.status(500).send(
                     errorResponse(
                         ErrorCodes.INTERNAL_ERROR,

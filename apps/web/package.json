@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@formatjs/icu-messageformat-parser": "^2.11.4",
+    "@novnc/novnc": "^1.6.0",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-dropdown-menu": "^2.0.6",
     "@radix-ui/react-select": "^2.0.0",
@@ -27,6 +28,7 @@
     "next-intl": "^3.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "socket.io-client": "^4.8.1",
     "tailwind-merge": "^2.2.0",
     "zod": "^3.22.4"
   },

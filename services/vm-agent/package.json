@@ -1,0 +1,29 @@
+{
+    "name": "@strike/vm-agent",
+    "version": "1.0.0",
+    "description": "Strike VM Agent - Lightweight game launcher for Windows VMs",
+    "main": "dist/index.js",
+    "scripts": {
+        "dev": "tsx watch src/index.ts",
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "clean": "rimraf dist"
+    },
+    "keywords": [
+        "strike",
+        "cloud-gaming",
+        "vm-agent"
+    ],
+    "author": "Strike Team",
+    "license": "MIT",
+    "dependencies": {
+        "fastify": "^4.25.1",
+        "dotenv": "^16.3.1"
+    },
+    "devDependencies": {
+        "@types/node": "^20.10.5",
+        "tsx": "^4.7.0",
+        "typescript": "^5.3.3",
+        "rimraf": "^5.0.5"
+    }
+}

@@ -19,13 +19,14 @@ function coerceStatus(value: unknown): GameSession['status'] {
 
 import dynamic from 'next/dynamic';
 
-const MoonlightClient = dynamic(() => import('../streaming/MoonlightClient'), {
+// ✅ NEW: Real WebRTC streaming (replaces Apollo)
+const WebRTCStreamPlayer = dynamic(() => import('../../src/components/WebRTCStreamPlayer').then(m => ({ default: m.WebRTCStreamPlayer })), {
   ssr: false,
   loading: () => (
     <div className="min-h-screen bg-black flex items-center justify-center">
       <div className="text-center">
         <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-white">Loading streaming client...</p>
+        <p className="text-white">Loading Strike WebRTC player...</p>
       </div>
     </div>
   ),
@@ -126,32 +127,17 @@ export function PlayPage() {
     );
   }
 
-  // If we have Sunshine connection details, use the real Moonlight client
-  if (session.host && session.port) {
-    return (
-      <div className="min-h-screen bg-black relative">
-        <MoonlightClient
-          host={session.host}
-          port={session.port}
-          udpPorts={session.udpPorts || []}
-          sessionId={session.id}
-          gameId={session.gameId}
-          appId={session.appId || 'test'}
-          useHttps={session.useHttps || false}
-        />
-        <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 pointer-events-none">
-          <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-2 text-right text-white/80">
-            <p className="text-xs uppercase tracking-[0.3em] text-white/60">Sunshine Session</p>
-            <p className="text-sm font-semibold break-all">{session.id}</p>
-            <p className="text-xs text-emerald-200">Host: {session.host}:{session.port}</p>
-          </div>
-          <div className="pointer-events-auto">
-            <SaveReplayButton sessionId={session.id} gameId={session.gameId} />
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // ✅ NEW: Use WebRTC streaming (via orchestrator) for all sessions
+  return (
+    <WebRTCStreamPlayer
+      sessionId={session.id}
+      orchestratorUrl="/api/orchestrator/v1"
+      width={1920}
+      height={1080}
+      fps={60}
+      bitrate={10000}
+    />
+  );
 
   return (
     <div className="min-h-screen bg-black relative">

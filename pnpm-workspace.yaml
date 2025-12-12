@@ -1,5 +1,11 @@
 packages:
-  - 'apps/*'
-  - 'services/*'
-  - 'packages/*'
+  - apps/*
+  - services/*
+  - packages/*
 
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - esbuild
+  - prisma
+  - unrs-resolver

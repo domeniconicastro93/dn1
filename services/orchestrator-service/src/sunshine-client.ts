@@ -70,6 +70,8 @@ class SunshineClient {
       ...config,
     };
 
+    console.log('[SunshineClient] Config:', JSON.stringify(this.config, null, 2));
+
     if (!this.config.password) {
       throw new SunshineConnectionError(
         'SUNSHINE_PASSWORD is required for Sunshine API authentication'
@@ -103,7 +105,7 @@ class SunshineClient {
   }
 
   /**
-   * Make a request to Sunshine API
+   * Make a request to Sunshine API using https.request (supports self-signed certs)
    */
   private async request<T>(
     endpoint: string,
@@ -111,72 +113,90 @@ class SunshineClient {
   ): Promise<T> {
     const url = `${this.getBaseUrl()}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
+    return new Promise((resolve, reject) => {
+      const urlObj = new URL(url);
+      const isHttps = urlObj.protocol === 'https:';
+      const httpModule = isHttps ? https : require('http');
 
-    try {
-      const fetchOptions: RequestInit = {
-        ...options,
+      const requestOptions = {
+        hostname: urlObj.hostname,
+        port: urlObj.port || (isHttps ? 443 : 80),
+        path: urlObj.pathname + urlObj.search,
+        method: options.method || 'GET',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: this.getAuthHeader(),
+          'Authorization': this.getAuthHeader(),
           ...options.headers,
         },
-        signal: controller.signal,
+        rejectUnauthorized: this.config.verifySsl,
+        timeout: this.config.timeout,
       };
 
-      // Add HTTPS agent for self-signed certificates
-      if (this.httpsAgent) {
-        (fetchOptions as any).agent = this.httpsAgent;
-      }
+      const req = httpModule.request(requestOptions, (res: any) => {
+        let data = '';
 
-      const response = await fetch(url, fetchOptions);
+        res.on('data', (chunk: any) => {
+          data += chunk;
+        });
 
-      clearTimeout(timeoutId);
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              const jsonData = JSON.parse(data);
+              // Sunshine API may return data directly or wrapped in a response object
+              resolve((jsonData?.data ?? jsonData) as T);
+            } catch (error) {
+              reject(new SunshineConnectionError(
+                'Failed to parse Sunshine API response',
+                res.statusCode,
+                data
+              ));
+            }
+          } else {
+            let errorDetails: unknown;
+            try {
+              errorDetails = JSON.parse(data);
+            } catch {
+              errorDetails = data;
+            }
 
-      if (!response.ok) {
-        let errorDetails: unknown;
-        try {
-          errorDetails = await response.json();
-        } catch {
-          errorDetails = await response.text();
+            reject(new SunshineConnectionError(
+              `Sunshine API request failed: ${res.statusMessage || 'Unknown error'}`,
+              res.statusCode,
+              errorDetails
+            ));
+          }
+        });
+      });
+
+      req.on('error', (error: Error) => {
+        if (error.message.includes('ECONNREFUSED')) {
+          reject(new SunshineConnectionError(
+            `Cannot connect to Sunshine at ${url}. Check that Sunshine is running and port ${this.config.port} is accessible.`
+          ));
+        } else {
+          reject(new SunshineConnectionError(
+            `Sunshine API request failed: ${error.message}`,
+            0,
+            error
+          ));
         }
+      });
 
-        throw new SunshineConnectionError(
-          `Sunshine API request failed: ${response.statusText}`,
-          response.status,
-          errorDetails
-        );
-      }
-
-      // Sunshine API may return data directly or wrapped in a response object
-      const data = await response.json() as any;
-      return (data?.data ?? data) as T;
-    } catch (error) {
-      clearTimeout(timeoutId);
-
-      if (error instanceof SunshineConnectionError) {
-        throw error;
-      }
-
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new SunshineConnectionError(
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new SunshineConnectionError(
           `Sunshine API request timed out after ${this.config.timeout}ms`
-        );
+        ));
+      });
+
+      // Send request body if present
+      if (options.body) {
+        req.write(typeof options.body === 'string' ? options.body : JSON.stringify(options.body));
       }
 
-      if (error instanceof Error && error.message.includes('ECONNREFUSED')) {
-        throw new SunshineConnectionError(
-          `Cannot connect to Sunshine at ${url}. Check that Sunshine is running and port ${this.config.port} is accessible.`
-        );
-      }
-
-      throw new SunshineConnectionError(
-        `Sunshine API request failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        0,
-        error
-      );
-    }
+      req.end();
+    });
   }
 
   /**
@@ -241,7 +261,8 @@ class SunshineClient {
    */
   async testConnection(): Promise<{ connected: boolean; error?: string }> {
     try {
-      await this.getStatus();
+      // Use /api/apps instead of /api/status since Sunshine doesn't have a status endpoint
+      await this.getApplications();
       return { connected: true };
     } catch (error) {
       return {

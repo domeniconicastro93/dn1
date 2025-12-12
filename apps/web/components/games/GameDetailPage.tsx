@@ -135,8 +135,27 @@ export function GameDetailPage({ slug }: GameDetailPageProps) {
 
       console.log('[GameDetailPage] Session started:', session);
 
-      // Redirect to play page
-      router.push(`/play/${session.sessionId}`);
+      // Save session details to sessionStorage for PlayPage
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem(
+          `strike:compute-session:${session.sessionId}`,
+          JSON.stringify({
+            host: session.host,
+            port: session.port,
+            appId: session.appIndex?.toString() || session.appId,
+            useHttps: session.useHttps,
+            udpPorts: session.udpPorts,
+            gameId: game.id,
+            steamAppId: game.steamAppId,
+          })
+        );
+      }
+
+      // Redirect to play page with session parameters
+      router.push(
+        `/play?sessionId=${session.sessionId}&gameId=${game.id}${game.steamAppId ? `&steamAppId=${game.steamAppId}` : ''
+        }`
+      );
     } catch (error) {
       console.error('[GameDetailPage] Error starting session:', error);
       alert('Failed to start session. Please try again.');
