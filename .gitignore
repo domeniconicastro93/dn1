@@ -1,0 +1,26 @@
+﻿# Env
+.env
+**/.env
+
+# Node
+node_modules/
+**/node_modules/
+.pnpm-store/
+**/.pnpm-store/
+
+# Build
+dist/
+**/dist/
+build/
+**/build/
+.next/
+**/.next/
+out/
+**/out/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
