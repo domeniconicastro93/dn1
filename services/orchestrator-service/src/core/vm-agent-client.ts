@@ -9,12 +9,12 @@
  * Single source of truth for VM Agent communication.
  */
 
-const VM_AGENT_URL = process.env.VM_AGENT_URL || 'http://localhost:8787';
-const VM_AGENT_TOKEN = process.env.VM_AGENT_TOKEN;
-const VM_AGENT_TIMEOUT_MS = parseInt(process.env.VM_AGENT_TIMEOUT_MS || '5000', 10);
+const VM_AGENT_URL = process.env.VM_AGENT_URL || 'http://127.0.0.1:8787';
+const STRIKE_AGENT_KEY = process.env.STRIKE_AGENT_KEY || process.env.VM_AGENT_TOKEN; // Prefer STRIKE_AGENT_KEY
+const VM_AGENT_TIMEOUT_MS = parseInt(process.env.VM_AGENT_TIMEOUT_MS || '10000', 10); // Increased to 10s
 
-if (!VM_AGENT_TOKEN) {
-    console.warn('[VMAgentClient] ⚠️ VM_AGENT_TOKEN not set - VM game launching will not work');
+if (!STRIKE_AGENT_KEY) {
+    console.warn('[VMAgentClient] ⚠️ STRIKE_AGENT_KEY not set - VM game launching will not work');
 }
 
 export interface VMHealthResponse {
@@ -44,7 +44,7 @@ export class VMAgentClient {
 
     constructor(agentUrl?: string, token?: string, timeout?: number) {
         this.agentUrl = agentUrl || VM_AGENT_URL;
-        this.token = token || VM_AGENT_TOKEN || '';
+        this.token = token || STRIKE_AGENT_KEY || '';
         this.timeout = timeout || VM_AGENT_TIMEOUT_MS;
 
         console.log('[VMAgentClient] Initialized');
@@ -93,40 +93,49 @@ export class VMAgentClient {
      * Launch a Steam game on VM
      */
     async launchGame(steamAppId: number | string): Promise<VMLaunchResponse> {
+        const startTime = Date.now();
         console.log('[VMAgentClient] Launching Steam game:', steamAppId);
+        console.log('[VMAgentClient] VM Agent URL:', this.agentUrl);
+        console.log('[VMAgentClient] Using auth key:', this.token ? this.token.substring(0, 8) + '...' : 'NONE');
 
         if (!this.token) {
-            console.error('[VMAgentClient] ❌ Cannot launch game: VM_AGENT_TOKEN not configured');
-            return { ok: false, error: 'VM_AGENT_TOKEN not configured' };
+            console.error('[VMAgentClient] ❌ Cannot launch game: STRIKE_AGENT_KEY not configured');
+            return { ok: false, error: 'STRIKE_AGENT_KEY not configured' };
         }
 
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-            const response = await fetch(`${this.agentUrl}/launch`, {
+            // Use /api/launch endpoint and x-strike-agent-key header (per VM Agent spec)
+            const response = await fetch(`${this.agentUrl}/api/launch`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Strike-Token': this.token
+                    'x-strike-agent-key': this.token
                 },
-                body: JSON.stringify({ steamAppId }),
+                body: JSON.stringify({ appId: Number(steamAppId) }), // VM Agent expects appId, not steamAppId
                 signal: controller.signal
             });
 
             clearTimeout(timeoutId);
+            const elapsed = Date.now() - startTime;
+
+            console.log('[VMAgentClient] Response status:', response.status, 'in', elapsed, 'ms');
 
             const data: VMLaunchResponse = await response.json();
+            console.log('[VMAgentClient] Response body:', JSON.stringify(data));
 
             if (!response.ok || !data.ok) {
                 console.error('[VMAgentClient] ❌ Launch failed:', data.error || response.statusText);
                 return { ok: false, error: data.error || `HTTP ${response.status}` };
             }
 
-            console.log('[VMAgentClient] ✅ Game launched successfully');
+            console.log('[VMAgentClient] ✅ Game launched successfully in', elapsed, 'ms');
             return data;
         } catch (error: any) {
-            console.error('[VMAgentClient] ❌ Launch request failed:', error.message);
+            const elapsed = Date.now() - startTime;
+            console.error('[VMAgentClient] ❌ Launch request failed after', elapsed, 'ms:', error.message);
 
             if (error.name === 'AbortError') {
                 return { ok: false, error: 'VM Agent launch timeout' };
