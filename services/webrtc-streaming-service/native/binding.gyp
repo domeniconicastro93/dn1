@@ -4,17 +4,19 @@
       "target_name": "native_capture",
       "sources": [
         "src/capture_addon.cc",
-        "src/wgc_capture.cc", 
+        "src/wgc_capture.cc",
         "src/dxgi_capture.cc",
         "src/h264_encoder.cc"
       ],
       "include_dirs": [
-        "<!@(node -p \"require('node-addon-api').include\")"
+        "<!@(node -p \"require('node-addon-api').include\")",
+        "C:/vcpkg/installed/x64-windows/include"
       ],
       "libraries": [
         "-ld3d11.lib",
         "-ldxgi.lib",
-        "-lwindowsapp.lib"
+        "-lwindowsapp.lib",
+        "C:/vcpkg/installed/x64-windows/lib/libx264.lib"
       ],
       "defines": [
         "NAPI_DISABLE_CPP_EXCEPTIONS",

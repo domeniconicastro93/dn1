@@ -1,8 +1,8 @@
 // h264_encoder.cc - x264 Software H.264 Encoder
 // Encoder-agnostic interface for future AMF integration
 
-#include <napi.h>
-#include <stdint.h>
+#include "h264_encoder.h"
+#include <cstdint>
 #include <vector>
 #include <memory>
 
@@ -10,195 +10,154 @@ extern "C" {
 #include <x264.h>
 }
 
-class H264Encoder {
-public:
-    struct Config {
-        int width;
-        int height;
-        int fps;
-        int bitrate;  // kbps
-    };
+// X264EncoderImpl implementation
 
-    H264Encoder() : encoder_(nullptr), picture_(nullptr), initialized_(false) {}
-    
-    ~H264Encoder() {
-        Cleanup();
+X264EncoderImpl::X264EncoderImpl() 
+    : encoder_(nullptr), initialized_(false) {
+}
+
+X264EncoderImpl::~X264EncoderImpl() {
+    Cleanup();
+}
+
+bool X264EncoderImpl::Initialize(const IEncoder::Config& config) {
+    config_ = config;
+
+    // Configure x264 parameters
+    x264_param_t param;
+    if (x264_param_default_preset(&param, "ultrafast", "zerolatency") < 0) {
+        return false;
     }
 
-    bool Initialize(const Config& config) {
-        config_ = config;
+    // Resolution and framerate
+    param.i_width = config.width;
+    param.i_height = config.height;
+    param.i_fps_num = config.fps;
+    param.i_fps_den = 1;
 
-        // Configure x264 parameters
-        x264_param_t param;
-        if (x264_param_default_preset(&param, "ultrafast", "zerolatency") < 0) {
-            return false;
-        }
+    // Bitrate control (VBR)
+    param.rc.i_rc_method = X264_RC_ABR;
+    param.rc.i_bitrate = config.bitrate;
+    param.rc.i_vbv_max_bitrate = static_cast<int>(config.bitrate * 1.5);
+    param.rc.i_vbv_buffer_size = config.bitrate;
 
-        // Resolution and framerate
-        param.i_width = config.width;
-        param.i_height = config.height;
-        param.i_fps_num = config.fps;
-        param.i_fps_den = 1;
+    // WebRTC-friendly GOP
+    param.i_keyint_max = config.fps * 2;  // Keyframe every 2 seconds
+    param.i_keyint_min = config.fps;
+    param.b_intra_refresh = 1;
 
-        // Bitrate control (VBR)
-        param.rc.i_rc_method = X264_RC_ABR;
-        param.rc.i_bitrate = config.bitrate;
-        param.rc.i_vbv_max_bitrate = config.bitrate * 1.5;
-        param.rc.i_vbv_buffer_size = config.bitrate;
+    // Low latency settings
+    param.i_threads = 4;
+    param.b_sliced_threads = 1;
+    param.i_sync_lookahead = 0;
+    param.rc.i_lookahead = 0;
 
-        // WebRTC-friendly GOP
-        param.i_keyint_max = config.fps * 2;  // Keyframe every 2 seconds
-        param.i_keyint_min = config.fps;
-        param.b_intra_refresh = 1;
+    // Annex B output (needed for RTP)
+    param.b_annexb = 1;
+    param.b_repeat_headers = 1;
 
-        // Low latency settings
-        param.i_threads = 4;
-        param.b_sliced_threads = 1;
-        param.i_sync_lookahead = 0;
-        param.rc.i_lookahead = 0;
-        
-        // Annexe B output (needed for RTP)
-        param.b_annexb = 1;
-        param.b_repeat_headers = 1;
+    // Profile
+    param.i_csp = X264_CSP_I420;
+    x264_param_apply_profile(&param, "baseline");
 
-        // Profile
-        param.i_csp = X264_CSP_I420;
-        x264_param_apply_profile(&param, "baseline");
-
-        // Create encoder
-        encoder_ = x264_encoder_open(&param);
-        if (!encoder_) {
-            return false;
-        }
-
-        // Allocate picture
-        if (x264_picture_alloc(&picture_in_, X264_CSP_I420, config.width, config.height) < 0) {
-            x264_encoder_close(encoder_);
-            encoder_ = nullptr;
-            return false;
-        }
-
-        initialized_ = true;
-        return true;
+    // Create encoder
+    encoder_ = x264_encoder_open(&param);
+    if (!encoder_) {
+        return false;
     }
 
-    // Encode BGRA frame to H.264 NAL units
-    std::vector<uint8_t> Encode(const uint8_t* bgra_data, int64_t timestamp_ms) {
-        std::vector<uint8_t> output;
-        
-        if (!initialized_ || !bgra_data) {
-            return output;
-        }
+    // Allocate picture
+    if (x264_picture_alloc(&picture_in_, X264_CSP_I420, config.width, config.height) < 0) {
+        x264_encoder_close(encoder_);
+        encoder_ = nullptr;
+        return false;
+    }
 
-        // Convert BGRA to I420 (YUV420p)
-        BGRAToI420(bgra_data, picture_in_.img.plane[0], picture_in_.img.plane[1], picture_in_.img.plane[2]);
+    initialized_ = true;
+    return true;
+}
 
-        // Set timestamp
-        picture_in_.i_pts = timestamp_ms * config_.fps / 1000;
+std::vector<uint8_t> X264EncoderImpl::Encode(const uint8_t* bgra_data, int64_t timestamp_ms) {
+    std::vector<uint8_t> output;
 
-        // Encode
-        x264_picture_t pic_out;
-        x264_nal_t* nals;
-        int num_nals;
-        
-        int frame_size = x264_encoder_encode(encoder_, &nals, &num_nals, &picture_in_, &pic_out);
-        
-        if (frame_size > 0) {
-            // Collect all NAL units (Annex B format)
-            for (int i = 0; i < num_nals; i++) {
-                output.insert(output.end(), nals[i].p_payload, nals[i].p_payload + nals[i].i_payload);
-            }
-        }
-
+    if (!initialized_ || !bgra_data) {
         return output;
     }
 
-    void Cleanup() {
-        if (encoder_) {
-            // Flush delayed frames
-            while (x264_encoder_delayed_frames(encoder_)) {
-                x264_picture_t pic_out;
-                x264_nal_t* nals;
-                int num_nals;
-                x264_encoder_encode(encoder_, &nals, &num_nals, nullptr, &pic_out);
+    // Convert BGRA to I420 (YUV420p)
+    BGRAToI420(bgra_data, picture_in_.img.plane[0], picture_in_.img.plane[1], picture_in_.img.plane[2]);
+
+    // Set timestamp
+    picture_in_.i_pts = timestamp_ms * config_.fps / 1000;
+
+    // Encode
+    x264_picture_t pic_out;
+    x264_nal_t* nals;
+    int num_nals;
+    int frame_size = x264_encoder_encode(encoder_, &nals, &num_nals, &picture_in_, &pic_out);
+
+    if (frame_size > 0) {
+        // Collect all NAL units (Annex B format)
+        for (int i = 0; i < num_nals; i++) {
+            output.insert(output.end(), nals[i].p_payload, nals[i].p_payload + nals[i].i_payload);
+        }
+    }
+
+    return output;
+}
+
+void X264EncoderImpl::Cleanup() {
+    if (encoder_) {
+        // Flush delayed frames
+        while (x264_encoder_delayed_frames(encoder_)) {
+            x264_picture_t pic_out;
+            x264_nal_t* nals;
+            int num_nals;
+            x264_encoder_encode(encoder_, &nals, &num_nals, nullptr, &pic_out);
+        }
+
+        x264_encoder_close(encoder_);
+        encoder_ = nullptr;
+    }
+
+    if (initialized_) {
+        x264_picture_clean(&picture_in_);
+        initialized_ = false;
+    }
+}
+
+void X264EncoderImpl::BGRAToI420(const uint8_t* bgra, uint8_t* y, uint8_t* u, uint8_t* v) {
+    int width = config_.width;
+    int height = config_.height;
+
+    // Simple BGRA to I420 conversion
+    for (int row = 0; row < height; row++) {
+        for (int col = 0; col < width; col++) {
+            int bgra_idx = (row * width + col) * 4;
+            int y_idx = row * width + col;
+
+            uint8_t b = bgra[bgra_idx + 0];
+            uint8_t g = bgra[bgra_idx + 1];
+            uint8_t r = bgra[bgra_idx + 2];
+
+            // Y = 0.299*R + 0.587*G + 0.114*B
+            y[y_idx] = static_cast<uint8_t>((77 * r + 150 * g + 29 * b) >> 8);
+
+            // U and V sampled at 2x2
+            if (row % 2 == 0 && col % 2 == 0) {
+                int uv_idx = (row / 2) * (width / 2) + (col / 2);
+                // U = -0.169*R - 0.331*G + 0.500*B + 128
+                u[uv_idx] = static_cast<uint8_t>(((-43 * r - 85 * g + 128 * b) >> 8) + 128);
+                // V = 0.500*R - 0.419*G - 0.081*B + 128
+                v[uv_idx] = static_cast<uint8_t>(((128 * r - 107 * g - 21 * b) >> 8) + 128);
             }
-            
-            x264_encoder_close(encoder_);
-            encoder_ = nullptr;
-        }
-        
-        if (initialized_) {
-            x264_picture_clean(&picture_in_);
-            initialized_ = false;
         }
     }
+}
 
-private:
-    void BGRAToI420(const uint8_t* bgra, uint8_t* y, uint8_t* u, uint8_t* v) {
-        int width = config_.width;
-        int height = config_.height;
-        
-        // Simple BGRA to I420 conversion (not optimized, but works)
-        for (int row = 0; row < height; row++) {
-            for (int col = 0; col < width; col++) {
-                int bgra_idx = (row * width + col) * 4;
-                int y_idx = row * width + col;
-                
-                uint8_t b = bgra[bgra_idx + 0];
-                uint8_t g = bgra[bgra_idx + 1];
-                uint8_t r = bgra[bgra_idx + 2];
-                
-                // Y = 0.299*R + 0.587*G + 0.114*B
-                y[y_idx] = (uint8_t)((77 * r + 150 * g + 29 * b) >> 8);
-                
-                // U and V sampled at 2x2
-                if (row % 2 == 0 && col % 2 == 0) {
-                    int uv_idx = (row / 2) * (width / 2) + (col / 2);
-                    // U = -0.169*R - 0.331*G + 0.500*B + 128
-                    u[uv_idx] = (uint8_t)(((-43 * r - 85 * g + 128 * b) >> 8) + 128);
-                    // V = 0.500*R - 0.419*G - 0.081*B + 128
-                    v[uv_idx] = (uint8_t)(((128 * r - 107 * g - 21 * b) >> 8) + 128);
-                }
-            }
-        }
-    }
-
-    x264_t* encoder_;
-    x264_picture_t picture_in_;
-    Config config_;
-    bool initialized_;
-};
-
-// Encoder interface for future AMF integration
-class IEncoder {
-public:
-    virtual ~IEncoder() {}
-    virtual bool Initialize(const H264Encoder::Config& config) = 0;
-    virtual std::vector<uint8_t> Encode(const uint8_t* bgra_data, int64_t timestamp_ms) = 0;
-    virtual void Cleanup() = 0;
-};
-
-class X264EncoderImpl : public IEncoder {
-public:
-    bool Initialize(const H264Encoder::Config& config) override {
-        return encoder_.Initialize(config);
-    }
-    
-    std::vector<uint8_t> Encode(const uint8_t* bgra_data, int64_t timestamp_ms) override {
-        return encoder_.Encode(bgra_data, timestamp_ms);
-    }
-    
-    void Cleanup() override {
-        encoder_.Cleanup();
-    }
-
-private:
-    H264Encoder encoder_;
-};
-
-// Factory for encoder selection (x264 now, AMF later)
+// Factory function implementation
 std::unique_ptr<IEncoder> CreateEncoder(bool use_hardware) {
-    // TODO: Check for AMD GPU and return AMF encoder if available
-    // For now, always return x264
+    // For now, always return x264 software encoder
+    // Future: Check use_hardware flag and return AMF encoder if available
     return std::make_unique<X264EncoderImpl>();
 }

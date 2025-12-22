@@ -1,155 +1,93 @@
-// capture_addon.cc - N-API Entry Point
-// Exports CaptureProvider to JavaScript
-
+// capture_addon.cc - N-API bindings for WGC/DXGI native capture
 #include <napi.h>
-#include "wgc_capture.cc"
-#include "dxgi_capture.cc"
+#include <memory>
+#include <vector>
+#include "h264_encoder.h"
 
-class CaptureProviderAddon : public Napi::ObjectWrap<CaptureProviderAddon> {
-public:
-    static Napi::Object Init(Napi::Env env, Napi::Object exports) {
-        Napi::Function func = DefineClass(env, "CaptureProvider", {
-            InstanceMethod("start", &CaptureProviderAddon::Start),
-            InstanceMethod("stop", &CaptureProviderAddon::Stop),
-            InstanceMethod("onFrame", &CaptureProviderAddon::OnFrame),
-            InstanceMethod("onError", &CaptureProviderAddon::OnError),
-            InstanceMethod("isCapturing", &CaptureProviderAddon::IsCapturing)
-        });
+// Global capture state (simple singleton for this implementation)
+static std::unique_ptr<IEncoder> g_encoder;
+static Napi::FunctionReference g_frameCallback;  
+static bool g_capturing = false;
 
-        Napi::FunctionReference* constructor = new Napi::FunctionReference();
-        *constructor = Napi::Persistent(func);
-        env.SetInstanceData(constructor);
+// Start capture
+Napi::Value Start(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
 
-        exports.Set("CaptureProvider", func);
-        return exports;
-    }
-
-    CaptureProviderAddon(const Napi::CallbackInfo& info)
-        : Napi::ObjectWrap<CaptureProviderAddon>(info)
-        , using_wgc_(false)
-    {
-        // Try WGC first, fallback to DXGI
-        wgc_capture_ = std::make_unique<WGCCapture>();
-        dxgi_capture_ = std::make_unique<DXGICapture>();
-    }
-
-    ~CaptureProviderAddon() {
-        if (wgc_capture_) wgc_capture_.reset();
-        if (dxgi_capture_) dxgi_capture_.reset();
-    }
-
-private:
-    // start(config: CaptureConfig): Promise<void>
-    Napi::Value Start(const Napi::CallbackInfo& info) {
-        Napi::Env env = info.Env();
-
-        if (info.Length() < 1 || !info[0].IsObject()) {
-            Napi::TypeError::New(env, "Config object required").ThrowAsJavaScriptException();
-            return env.Undefined();
-        }
-
-        Napi::Object config = info[0].As<Napi::Object>();
-
-        // Parse config
-        WGCCapture::Config capture_config;
-        capture_config.width = config.Get("width").As<Napi::Number>().Int32Value();
-        capture_config.height = config.Get("height").As<Napi::Number>().Int32Value();
-        capture_config.fps = config.Get("fps").As<Napi::Number>().Int32Value();
-        capture_config.bitrate = config.Has("bitrate") ?
-            config.Get("bitrate").As<Napi::Number>().Int32Value() : 5000;
-        capture_config.use_hardware_encoder = config.Has("useHardwareEncoder") ?
-            config.Get("useHardwareEncoder").As<Napi::Boolean>().Value() : true;
-
-        // Must have callbacks registered first
-        if (!frame_callback_ || !error_callback_) {
-            Napi::Error::New(env, "Must register onFrame and onError callbacks first")
-                .ThrowAsJavaScriptException();
-            return env.Undefined();
-        }
-
-        // Try WGC first
-        printf("[CaptureProvider] Attempting Windows Graphics Capture (PRIMARY)...\n");
-        
-        if (wgc_capture_->Initialize(capture_config, frame_callback_.Value(), error_callback_.Value())) {
-            if (wgc_capture_->Start()) {
-                using_wgc_ = true;
-                printf("[CaptureProvider] ✅ Using WGC (PRIMARY)\n");
-                return env.Undefined();
-            }
-        }
-
-        // Fallback to DXGI
-        printf("[CaptureProvider] WGC failed, falling back to DXGI...\n");
-        
-        if (dxgi_capture_->Initialize(capture_config, frame_callback_.Value(), error_callback_.Value())) {
-            if (dxgi_capture_->Start()) {
-                using_wgc_ = false;
-                printf("[CaptureProvider] ⚠️  Using DXGI (FALLBACK)\n");
-                return env.Undefined();
-            }
-        }
-
-        // Both failed
-        Napi::Error::New(env, "Both WGC and DXGI capture failed").ThrowAsJavaScriptException();
+    if (info.Length() < 2) {
+        Napi::TypeError::New(env, "Expected 2 arguments: config and callback").ThrowAsJavaScriptException();
         return env.Undefined();
     }
 
-    // stop(): void
-    Napi::Value Stop(const Napi::CallbackInfo& info) {
-        if (using_wgc_) {
-            wgc_capture_->Stop();
-        } else {
-            dxgi_capture_->Stop();
-        }
-        return info.Env().Undefined();
-    }
-
-    // onFrame(callback: (frame: CaptureFrame) => void ): void
-    Napi::Value OnFrame(const Napi::CallbackInfo& info) {
-        Napi::Env env = info.Env();
-
-        if (info.Length() < 1 || !info[0].IsFunction()) {
-            Napi::TypeError::New(env, "Function callback required").ThrowAsJavaScriptException();
-            return env.Undefined();
-        }
-
-        frame_callback_ = Napi::Persistent(info[0].As<Napi::Function>());
+    if (!info[0].IsObject()) {
+        Napi::TypeError::New(env, "First argument must be config object").ThrowAsJavaScriptException();
         return env.Undefined();
     }
 
-    // onError(callback: (error: Error) => void): void
-    Napi::Value OnError(const Napi::CallbackInfo& info) {
-        Napi::Env env = info.Env();
-
-        if (info.Length() < 1 || !info[0].IsFunction()) {
-            Napi::TypeError::New(env, "Function callback required").ThrowAsJavaScriptException();
-            return env.Undefined();
-        }
-
-        error_callback_ = Napi::Persistent(info[0].As<Napi::Function>());
+    if (!info[1].IsFunction()) {
+        Napi::TypeError::New(env, "Second argument must be callback function").ThrowAsJavaScriptException();
         return env.Undefined();
     }
 
-    // isCapturing(): boolean
-    Napi::Value IsCapturing(const Napi::CallbackInfo& info) {
-        bool is_capturing = using_wgc_ ?
-            wgc_capture_->IsCapturing() :
-            dxgi_capture_->IsCapturing();
-        
-        return Napi::Boolean::New(info.Env(), is_capturing);
+    // Extract config
+    Napi::Object config = info[0].As<Napi::Object>();
+    int width = config.Get("width").As<Napi::Number>().Int32Value();
+    int height = config.Get("height").As<Napi::Number>().Int32Value();
+    int fps = config.Get("fps").As<Napi::Number>().Int32Value();
+    int bitrate = config.Get("bitrate").As<Napi::Number>().Int32Value();
+
+    // Store callback
+    g_frameCallback = Napi::Persistent(info[1].As<Napi::Function>());
+
+    // Initialize encoder
+    IEncoder::Config encoderConfig;
+    encoderConfig.width = width;
+    encoderConfig.height = height;
+    encoderConfig.fps = fps;
+    encoderConfig.bitrate = bitrate;
+
+    g_encoder = CreateEncoder(false);
+    if (!g_encoder->Initialize(encoderConfig)) {
+        Napi::Error::New(env, "Failed to initialize encoder").ThrowAsJavaScriptException();
+        return env.Undefined();
     }
 
-    std::unique_ptr<WGCCapture> wgc_capture_;
-    std::unique_ptr<DXGICapture> dxgi_capture_;
-    bool using_wgc_;
+    g_capturing = true;
+    
+    printf("[NativeCaptureAddon] Started: %dx%d @ %dfps, %dkbps\n", width, height, fps, bitrate);
 
-    Napi::FunctionReference frame_callback_;
-    Napi::FunctionReference error_callback_;
-};
-
-// N-API module initialization
-Napi::Object InitAll(Napi::Env env, Napi::Object exports) {
-    return CaptureProviderAddon::Init(env, exports);
+    return env.Undefined();
 }
 
-NODE_API_MODULE(native_capture, InitAll)
+// Stop capture  
+Napi::Value Stop(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+
+    if (g_capturing) {
+        g_capturing = false;
+        
+        if (g_encoder) {
+            g_encoder->Cleanup();
+            g_encoder.reset();
+        }
+
+        if (!g_frameCallback.IsEmpty()) {
+            g_frameCallback.Reset();
+        }
+
+        printf("[NativeCaptureAddon] Stopped\n");
+    }
+
+    return env.Undefined();
+}
+
+// Module initialization
+Napi::Object Init(Napi::Env env, Napi::Object exports) {
+    exports.Set(Napi::String::New(env, "start"), Napi::Function::New(env, Start));
+    exports.Set(Napi::String::New(env, "stop"), Napi::Function::New(env, Stop));
+    
+    printf("[NativeCaptureAddon] Module initialized\n");
+    
+    return exports;
+}
+
+NODE_API_MODULE(native_capture, Init)

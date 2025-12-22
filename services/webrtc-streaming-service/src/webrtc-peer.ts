@@ -1,13 +1,13 @@
 import { RTCPeerConnection, MediaStreamTrack, RTCRtpSender } from 'werift';
+const nativeCapture = require('../native/build/Release/native_capture.node');
 import { EventEmitter } from 'events';
 import { H264Parser, NALUnit } from './h264-parser';
 import { RTPPacketizer } from './rtp-packetizer';
-import { createCaptureProvider, CaptureProvider, CaptureFrame } from './capture-provider';
 
 /**
  * WebRTC Peer for Strike Cloud Gaming - COMPLETE IMPLEMENTATION
  * 
- * FFmpeg → H.264 → NAL Units → RTP Packets → WebRTC
+ * Native → H.264 → NAL Units → RTP Packets → WebRTC
  */
 
 export interface StreamConfig {
@@ -21,7 +21,6 @@ export interface StreamConfig {
 export class WebRTCPeer extends EventEmitter {
     private peerConnection: RTCPeerConnection;
     private streamConfig: StreamConfig;
-    private captureProvider: CaptureProvider | null = null;
     private sessionId: string;
     private videoTrack: MediaStreamTrack | null = null;
     private h264Parser: H264Parser;
@@ -120,47 +119,24 @@ export class WebRTCPeer extends EventEmitter {
     }
 
     /**
-     * Start WGC/DXGI desktop capture
+     * Start Native desktop capture
      */
-    private async startCapture(): Promise<void> {
-        console.log(`[WebRTCPeer][${this.sessionId}] 🎬 Starting WGC/DXGI capture...`);
-
-        const { width, height, fps, bitrate } = this.streamConfig;
-
-        try {
-            // Create native capture provider (WGC → DXGI fallback)
-            this.captureProvider = await createCaptureProvider();
-
-            // Handle captured frames
-            this.captureProvider.onFrame((frame: CaptureFrame) => {
-                // Feed H.264 NAL units directly to parser
-                this.processH264Data(frame.data);
-            });
-
-            // Handle capture errors
-            this.captureProvider.onError((error) => {
-                console.error(`[WebRTCPeer][${this.sessionId}] Capture error:`, error);
-            });
-
-            // Start capture
-            await this.captureProvider.start({
-                width,
-                height,
-                fps,
-                bitrate: bitrate || 5000,
-                useHardwareEncoder: true // AMD AMF if available
-            });
-
-            console.log(`[WebRTCPeer][${this.sessionId}] ✅ Capture started`);
-
-        } catch (error: any) {
-            console.error(`[WebRTCPeer][${this.sessionId}] Failed to start capture:`, error.message);
-            throw error;
-        }
+        private startCapture(): void {
+        console.log(`[WebRTCPeer][${this.sessionId}] Starting native capture`);
+        nativeCapture.start({
+            width: this.streamConfig.width,
+            height: this.streamConfig.height,
+            fps: this.streamConfig.fps,
+            bitrate: this.streamConfig.bitrate ?? 5000,
+            useHardwareEncoder: false
+        }, (nalBuffer: Buffer) => {
+            this.processH264Data(nalBuffer);
+        });
+        console.log(`[WebRTCPeer][${this.sessionId}] Native capture started`);
     }
 
     /**
-     * Process H.264 data from FFmpeg
+     * Process H.264 data from Native
      */
     private processH264Data(data: Buffer): void {
         // Add to H.264 parser
@@ -244,14 +220,10 @@ export class WebRTCPeer extends EventEmitter {
     /**
      * Stop capture
      */
-    private stopCapture(): void {
-        if (this.captureProvider) {
-            console.log(`[WebRTCPeer][${this.sessionId}] Stopping capture...`);
-            this.captureProvider.stop();
-            this.captureProvider = null;
-        }
-
+        private stopCapture(): void {
+        if (nativeCapture?.stop) nativeCapture.stop();
         this.h264Parser.clear();
+        console.log(`[WebRTCPeer][${this.sessionId}] Native capture stopped`);
     }
 
     /**
