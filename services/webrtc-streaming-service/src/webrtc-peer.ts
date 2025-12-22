@@ -105,6 +105,11 @@ export class WebRTCPeer extends EventEmitter {
     async handleAnswer(answer: any): Promise<void> {
         await this.peerConnection.setRemoteDescription(answer);
         console.log(`[WebRTCPeer][${this.sessionId}] ✅ Answer set`);
+
+        // 🔥 FIX: Start capture immediately after answer is set
+        // Don't wait for connectionState=connected (chicken-and-egg problem)
+        console.log(`[WebRTCPeer][${this.sessionId}] Starting capture immediately...`);
+        this.startCapture();
     }
 
     /**
