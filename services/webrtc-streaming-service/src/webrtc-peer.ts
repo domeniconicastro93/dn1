@@ -1,8 +1,8 @@
 import { RTCPeerConnection, MediaStreamTrack, RTCRtpSender } from 'werift';
-import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import { H264Parser, NALUnit } from './h264-parser';
 import { RTPPacketizer } from './rtp-packetizer';
+import { createCaptureProvider, CaptureProvider, CaptureFrame } from './capture-provider';
 
 /**
  * WebRTC Peer for Strike Cloud Gaming - COMPLETE IMPLEMENTATION
@@ -21,7 +21,7 @@ export interface StreamConfig {
 export class WebRTCPeer extends EventEmitter {
     private peerConnection: RTCPeerConnection;
     private streamConfig: StreamConfig;
-    private ffmpegProcess: ChildProcess | null = null;
+    private captureProvider: CaptureProvider | null = null;
     private sessionId: string;
     private videoTrack: MediaStreamTrack | null = null;
     private h264Parser: H264Parser;
@@ -120,68 +120,43 @@ export class WebRTCPeer extends EventEmitter {
     }
 
     /**
-     * Start FFmpeg desktop capture
+     * Start WGC/DXGI desktop capture
      */
-    private startCapture(): void {
-        console.log(`[WebRTCPeer][${this.sessionId}] 🎬 Starting FFmpeg capture...`);
+    private async startCapture(): Promise<void> {
+        console.log(`[WebRTCPeer][${this.sessionId}] 🎬 Starting WGC/DXGI capture...`);
 
-        const { width, height, fps, bitrate, preset = 'ultrafast' } = this.streamConfig;
-        const ffmpegPath = process.env.FFMPEG_PATH || 'C:\\Strike\\ffmpeg.exe';
+        const { width, height, fps, bitrate } = this.streamConfig;
 
-        this.ffmpegProcess = spawn(ffmpegPath, [
-            // Input: Windows Desktop (GDI)
-            '-f', 'gdigrab',
-            '-framerate', fps.toString(),
-            '-video_size', `${width}x${height}`,
-            '-i', 'desktop',
+        try {
+            // Create native capture provider (WGC → DXGI fallback)
+            this.captureProvider = await createCaptureProvider();
 
-            // Encoding: H.264 baseline (max compatibility)
-            '-vcodec', 'libx264',
-            '-preset', preset,
-            '-tune', 'zerolatency',
-            '-profile:v', 'baseline',
-            '-level', '3.1',
-            '-g', (fps * 2).toString(),
-            '-keyint_min', fps.toString(),
-            '-sc_threshold', '0',
-            '-b:v', `${bitrate}k`,
-            '-maxrate', `${bitrate}k`,
-            '-bufsize', `${bitrate * 2}k`,
-            '-pix_fmt', 'yuv420p',
+            // Handle captured frames
+            this.captureProvider.onFrame((frame: CaptureFrame) => {
+                // Feed H.264 NAL units directly to parser
+                this.processH264Data(frame.data);
+            });
 
-            // Output: H.264 Annex B to stdout
-            '-f', 'h264',
-            'pipe:1'
-        ], {
-            stdio: ['ignore', 'pipe', 'pipe']
-        });
+            // Handle capture errors
+            this.captureProvider.onError((error) => {
+                console.error(`[WebRTCPeer][${this.sessionId}] Capture error:`, error);
+            });
 
-        console.log(`[WebRTCPeer][${this.sessionId}] FFmpeg started`);
+            // Start capture
+            await this.captureProvider.start({
+                width,
+                height,
+                fps,
+                bitrate: bitrate || 5000,
+                useHardwareEncoder: true // AMD AMF if available
+            });
 
-        // Process H.264 stream
-        this.ffmpegProcess.stdout?.on('data', (chunk: Buffer) => {
-            this.processH264Data(chunk);
-        });
+            console.log(`[WebRTCPeer][${this.sessionId}] ✅ Capture started`);
 
-        // Log FFmpeg errors
-        this.ffmpegProcess.stderr?.on('data', (data: Buffer) => {
-            const log = data.toString();
-            // Only log important messages
-            if (log.includes('Stream #0:0') || log.includes('frame=')) {
-                const match = log.match(/frame=\s*(\d+)/);
-                if (match && parseInt(match[1]) % 100 === 0) {
-                    console.log(`[FFmpeg][${this.sessionId}] Frames: ${match[1]}`);
-                }
-            }
-            if (log.includes('error') || log.includes('Error')) {
-                console.error(`[FFmpeg][${this.sessionId}]`, log.trim());
-            }
-        });
-
-        // Handle FFmpeg exit
-        this.ffmpegProcess.on('close', (code) => {
-            console.log(`[WebRTCPeer][${this.sessionId}] FFmpeg exited: ${code}`);
-        });
+        } catch (error: any) {
+            console.error(`[WebRTCPeer][${this.sessionId}] Failed to start capture:`, error.message);
+            throw error;
+        }
     }
 
     /**
@@ -270,10 +245,10 @@ export class WebRTCPeer extends EventEmitter {
      * Stop capture
      */
     private stopCapture(): void {
-        if (this.ffmpegProcess) {
-            console.log(`[WebRTCPeer][${this.sessionId}] Stopping FFmpeg...`);
-            this.ffmpegProcess.kill('SIGTERM');
-            this.ffmpegProcess = null;
+        if (this.captureProvider) {
+            console.log(`[WebRTCPeer][${this.sessionId}] Stopping capture...`);
+            this.captureProvider.stop();
+            this.captureProvider = null;
         }
 
         this.h264Parser.clear();
