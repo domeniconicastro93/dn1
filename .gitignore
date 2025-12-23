@@ -13,14 +13,24 @@ dist/
 **/dist/
 build/
 **/build/
+**/build/Release/
+**/*.node
 .next/
 **/.next/
 out/
 **/out/
 
 # Logs
+logs/
 *.log
 
 # OS
 .DS_Store
 Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env.*

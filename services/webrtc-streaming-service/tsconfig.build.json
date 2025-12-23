@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": [
+      "ES2020"
+    ],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmitOnError": false,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "include": [
+    "src/index.ts",
+    "src/capture-provider.ts",
+    "src/webrtc-peer.ts",
+    "src/h264-parser.ts",
+    "src/rtp-packetizer.ts",
+    "src/wrtc.d.ts"
+  ],
+  "exclude": [
+    "src/index.deprecated.ts",
+    "node_modules"
+  ]
+}

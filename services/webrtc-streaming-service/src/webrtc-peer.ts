@@ -1,4 +1,4 @@
-import { RTCPeerConnection, MediaStreamTrack, RTCRtpSender } from 'werift';
+import { RTCPeerConnection, MediaStreamTrack, RTCRtpSender, RtpPacket, RtpHeader, RTCRtpCodecParameters } from 'werift';
 const nativeCapture = require('../native/build/Release/native_capture.node');
 import { EventEmitter } from 'events';
 import { H264Parser, NALUnit } from './h264-parser';
@@ -27,6 +27,13 @@ export class WebRTCPeer extends EventEmitter {
     private rtpPacketizer: RTPPacketizer;
     private rtpSender: RTCRtpSender | null = null;
     private frameCount: number = 0;
+    private canSendRtp: boolean = false;
+    private _rtpOnce = new Set<string>();
+    private _rtpOnceLog(msg: string) { if (this._rtpOnce.has(msg)) return; this._rtpOnce.add(msg); console.log("[RTP-TRACE]", msg); }
+    
+    // REQUIRED FOR CHROME WEBRTC DECODER: Cache parameter sets for IDR re-injection
+    private cachedSPS: NALUnit | null = null;
+    private cachedPPS: NALUnit | null = null;
 
     constructor(sessionId: string, streamConfig: StreamConfig) {
         super();
@@ -35,13 +42,29 @@ export class WebRTCPeer extends EventEmitter {
         this.h264Parser = new H264Parser();
         this.rtpPacketizer = new RTPPacketizer(streamConfig.fps);
 
-        // Create RTCPeerConnection
+        // Create RTCPeerConnection with H.264 support
         this.peerConnection = new RTCPeerConnection({
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' }
             ],
             bundlePolicy: 'max-bundle',
+            // @ts-ignore - werift supports codecs in config but type definition might be missing
+            codecs: {
+                video: [
+                    new RTCRtpCodecParameters({
+                        mimeType: "video/H264",
+                        clockRate: 90000,
+                        payloadType: 96,
+                        rtcpFeedback: [
+                            { type: "nack" },
+                            { type: "nack", parameter: "pli" },
+                            { type: "goog-remb" }
+                        ],
+                        parameters: "packetization-mode=1;profile-level-id=42e01f;level-asymmetry-allowed=1"
+                    })
+                ]
+            }
         });
 
         // Handle ICE candidates
@@ -58,11 +81,14 @@ export class WebRTCPeer extends EventEmitter {
             this.emit('connectionstatechange', state);
 
             if (state === 'connected') {
-                console.log(`[WebRTCPeer][${sessionId}] ✅ WebRTC connected! Starting capture...`);
+                this.canSendRtp = true;
+                console.log(`[WebRTCPeer][${sessionId}] ✅ WebRTC connected! canSendRtp=true`);
+                this._rtpOnceLog("CONNECTED: canSendRtp=true");
                 this.startCapture();
             }
 
-            if (state === 'failed' || state === 'closed') {
+            if (state === 'failed' || state === 'closed' || state === 'disconnected') {
+                this.canSendRtp = false;
                 this.stopCapture();
             }
         };
@@ -121,7 +147,7 @@ export class WebRTCPeer extends EventEmitter {
     /**
      * Start Native desktop capture
      */
-        private startCapture(): void {
+    private startCapture(): void {
         console.log(`[WebRTCPeer][${this.sessionId}] Starting native capture`);
         nativeCapture.start({
             width: this.streamConfig.width,
@@ -163,10 +189,43 @@ export class WebRTCPeer extends EventEmitter {
             console.log(`[WebRTCPeer][${this.sessionId}] Frame ${this.frameCount}: ${nalTypeName} (${nalUnit.data.length} bytes)`);
         }
 
-        // Packetize NAL unit into RTP packets
-        const rtpPackets = this.rtpPacketizer.packetize(nalUnit);
+        // REQUIRED FOR CHROME WEBRTC DECODER: Cache SPS and PPS for re-injection
+        if (nalUnit.type === 7) {
+            this.cachedSPS = nalUnit;
+        } else if (nalUnit.type === 8) {
+            this.cachedPPS = nalUnit;
+        }
 
-        // Send RTP packets
+        // REQUIRED FOR CHROME WEBRTC DECODER: Re-inject SPS+PPS before EVERY IDR
+        // Chrome requires parameter sets before each keyframe with same timestamp
+        if (nalUnit.type === 5 && this.cachedSPS && this.cachedPPS) {
+            // Get IDR timestamp before packetizing
+            const idrTimestamp = this.rtpPacketizer.getTimestamp();
+            
+            // Send SPS with marker=false, same timestamp as IDR
+            const spsPackets = this.rtpPacketizer.packetize(this.cachedSPS);
+            for (const pkt of spsPackets) {
+                pkt.marker = false; // Never mark SPS
+                pkt.timestamp = idrTimestamp;
+                this.sendRTPPacket(pkt);
+            }
+            
+            // Send PPS with marker=false, same timestamp as IDR
+            const ppsPackets = this.rtpPacketizer.packetize(this.cachedPPS);
+            for (const pkt of ppsPackets) {
+                pkt.marker = false; // Never mark PPS
+                pkt.timestamp = idrTimestamp;
+                this.sendRTPPacket(pkt);
+            }
+        }
+
+        // Packetize and send current NAL unit (IDR will have marker=true)
+        const rtpPackets = this.rtpPacketizer.packetize(nalUnit);
+        if (rtpPackets.length === 0) {
+            console.warn(`[WebRTCPeer][${this.sessionId}] WARNING: Packetizer returned 0 packets for NAL type ${nalUnit.type}`);
+            return;
+        }
+
         for (const rtpPacket of rtpPackets) {
             this.sendRTPPacket(rtpPacket);
         }
@@ -175,52 +234,65 @@ export class WebRTCPeer extends EventEmitter {
     /**
      * Send RTP packet via WebRTC
      */
-    private sendRTPPacket(packet: any): void {
-        if (!this.rtpSender || !this.videoTrack) {
-            return;
+    private negotiatedPayloadType: number | null = null;
+    private ssrc: number | null = null;
+
+    private getNegotiatedPayloadType(): number {
+        if (this.negotiatedPayloadType) return this.negotiatedPayloadType;
+
+        const remoteDesc = this.peerConnection.remoteDescription;
+        if (remoteDesc && remoteDesc.sdp) {
+            const match = remoteDesc.sdp.match(/a=rtpmap:(\d+) H264\/90000/i);
+            if (match) {
+                this.negotiatedPayloadType = parseInt(match[1], 10);
+                return this.negotiatedPayloadType;
+            }
         }
+        return 96; // Fallback
+    }
+
+    private sendRTPPacket(packet: any): void {
+        if (!this.rtpSender || !this.videoTrack || !this.canSendRtp) return;
 
         try {
-            // ⚠️ CRITICAL: werift doesn't have direct sendRTP API
-            // We need to use the underlying transceiver's track
-
-            // For werift, we need to write RTP packets directly to the track's writer
-            // This is the missing piece that makes it work!
-
-            // Access the track's internal RTP stream
             const track = this.videoTrack as any;
 
-            if (track.writeRtp) {
-                // Write RTP packet
-                track.writeRtp({
-                    payload: packet.payload,
-                    marker: packet.marker,
-                    payloadType: 96, // H.264 payload type
-                    sequenceNumber: this.rtpPacketizer.getSequenceNumber(),
-                    timestamp: packet.timestamp,
-                    ssrc: track.ssrc || 1234 // Synchronization source
-                });
+            // Resolve SSRC once
+            if (!this.ssrc) {
+                // @ts-ignore
+                this.ssrc = track.ssrc || (this.rtpSender ? (this.rtpSender as any).ssrc : null);
 
-                this.rtpPacketizer.incrementSequenceNumber();
-            } else {
-                // Fallback: werift might not support this yet
-                // In that case, we've proven the pipeline works up to RTP packets
-                if (this.frameCount === 1) {
-                    console.warn(`[WebRTCPeer][${this.sessionId}] ⚠️  werift track.writeRtp not available`);
-                    console.warn(`[WebRTCPeer][${this.sessionId}] Pipeline works but RTP send not supported by werift`);
+                // One-time verification log
+                if (this.ssrc) {
+                    const negotiatedPT = this.getNegotiatedPayloadType();
+                    // Intentionally logging hardcoded 96 for header PT as that's what we are currently using before Phase 2 fix
+                    console.log(`[VERIFY][${this.sessionId}] negotiated_pt=${negotiatedPT} header_pt=96 track_ssrc=${track.ssrc} sender_ssrc=${(this.rtpSender as any).ssrc} header_ssrc=${this.ssrc}`);
                 }
             }
+
+            if (!this.ssrc) return;
+
+            const header = new RtpHeader({
+                payloadType: 96, // Still hardcoded for Phase 1
+                sequenceNumber: this.rtpPacketizer.getSequenceNumber(),
+                timestamp: packet.timestamp,
+                marker: packet.marker,
+                ssrc: this.ssrc
+            });
+
+            const rtpPacket = new RtpPacket(header, packet.payload);
+            track.writeRtp(rtpPacket);
+            this.rtpPacketizer.incrementSequenceNumber();
+
         } catch (error: any) {
-            if (this.frameCount <= 3) {
-                console.error(`[WebRTCPeer][${this.sessionId}] RTP send error:`, error.message);
-            }
+            console.error(`[WebRTCPeer][${this.sessionId}] RTP WRITE ERROR:`, error.message);
         }
     }
 
     /**
      * Stop capture
      */
-        private stopCapture(): void {
+    private stopCapture(): void {
         if (nativeCapture?.stop) nativeCapture.stop();
         this.h264Parser.clear();
         console.log(`[WebRTCPeer][${this.sessionId}] Native capture stopped`);

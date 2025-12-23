@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>WebRTC ICE Fix Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+        }
+
+        video {
+            width: 640px;
+            height: 480px;
+            background: #000;
+            border: 2px solid #333;
+        }
+
+        .log {
+            white-space: pre-wrap;
+            background: #f0f0f0;
+            padding: 10px;
+            margin: 10px 0;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .stats {
+            background: #e0ffe0;
+            padding: 10px;
+            margin: 10px 0;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>WebRTC ICE Fix Test</h2>
+    <button id="startBtn" onclick="startStream()">Start Stream</button>
+    <br><br>
+    <video id="remoteVideo" autoplay playsinline muted></video>
+
+    <div class="stats" id="stats">Stats will appear here...</div>
+    <div class="log" id="log">Logs will appear here...</div>
+
+    <script>
+        let pc;
+        let pollInterval;
+        const sessionId = 'browser-' + Date.now();
+        const serverUrl = 'http://localhost:3015';
+        const logDiv = document.getElementById('log');
+        const statsDiv = document.getElementById('stats');
+
+        function log(msg) {
+            const timestamp = new Date().toISOString().substr(11, 12);
+            logDiv.textContent += `[${timestamp}] ${msg}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(msg);
+        }
+
+        async function pollServerCandidates() {
+            try {
+                const res = await fetch(`${serverUrl}/webrtc/session/${sessionId}/candidates`);
+                const data = await res.json();
+
+                if (data.candidates && data.candidates.length > 0) {
+                    log(`📥 Received ${data.candidates.length} server ICE candidate(s)`);
+                    for (const candidate of data.candidates) {
+                        await pc.addIceCandidate(candidate);
+                        log(`✓ Added server ICE candidate`);
+                    }
+                }
+            } catch (error) {
+                log(`⚠️  Polling error: ${error.message}`);
+            }
+        }
+
+        async function startStream() {
+            log(`🚀 Starting session: ${sessionId}`);
+
+            // Create peer connection
+            pc = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+
+            // Log ICE states
+            pc.oniceconnectionstatechange = () => {
+                log(`[ICE] iceConnectionState: ${pc.iceConnectionState}`);
+            };
+
+            pc.onconnectionstatechange = () => {
+                log(`[CONN] connectionState: ${pc.connectionState}`);
+
+                if (pc.connectionState === 'connected') {
+                    log(`🎉 CONNECTION ESTABLISHED!`);
+                    clearInterval(pollInterval);
+                }
+            };
+
+            // Handle remote track
+            pc.ontrack = (event) => {
+                log(`✓ Track received: ${event.track.kind}`);
+                document.getElementById('remoteVideo').srcObject = event.streams[0];
+
+                // Start stats monitoring
+                setInterval(async () => {
+                    const stats = await pc.getStats();
+                    let framesDecoded = 0, packetsReceived = 0, bytesReceived = 0;
+
+                    stats.forEach(report => {
+                        if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                            framesDecoded = report.framesDecoded || 0;
+                            packetsReceived = report.packetsReceived || 0;
+                            bytesReceived = report.bytesReceived || 0;
+                        }
+                    });
+
+                    statsDiv.innerHTML =
+                        `<b>STATS:</b>\n` +
+                        `Frames Decoded: ${framesDecoded}\n` +
+                        `Packets Received: ${packetsReceived}\n` +
+                        `Bytes Received: ${bytesReceived}\n` +
+                        `ICE: ${pc.iceConnectionState} | Conn: ${pc.connectionState}`;
+                }, 1000);
+            };
+
+            // Send browser ICE candidates to server
+            pc.onicecandidate = async (event) => {
+                if (event.candidate) {
+                    log(`🧊 Sending browser ICE candidate to server`);
+                    await fetch(`${serverUrl}/webrtc/session/${sessionId}/ice`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ candidate: event.candidate })
+                    });
+                } else {
+                    log('🧊 Browser ICE gathering complete');
+                }
+            };
+
+            // Request offer
+            log('📡 Requesting offer...');
+            const res1 = await fetch(`${serverUrl}/webrtc/session/${sessionId}/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ width: 1280, height: 720, fps: 30, bitrate: 3000 })
+            });
+            const { offer } = await res1.json();
+            log('✓ Offer received');
+
+            await pc.setRemoteDescription(offer);
+            log('✓ setRemoteDescription(offer) done');
+
+            // Create answer
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            log(`✓ Answer created`);
+
+            // Send answer
+            await fetch(`${serverUrl}/webrtc/session/${sessionId}/answer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ answer })
+            });
+            log('✓ Answer sent to server');
+
+            // START POLLING for server ICE candidates
+            log('🔄 Starting ICE candidate polling...');
+            pollInterval = setInterval(pollServerCandidates, 500); // Poll every 500ms
+        }
+    </script>
+</body>
+
+</html>

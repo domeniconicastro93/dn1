@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <vector>
 #include <memory>
+#include <map>
 
 extern "C" {
 #include <x264.h>
@@ -14,9 +15,11 @@ extern "C" {
 
 X264EncoderImpl::X264EncoderImpl() 
     : encoder_(nullptr), initialized_(false) {
+    printf("[X264] CONSTRUCTOR this=%p\n", this);
 }
 
 X264EncoderImpl::~X264EncoderImpl() {
+    printf("[X264] DESTRUCTOR this=%p\n", this);
     Cleanup();
 }
 
@@ -41,10 +44,11 @@ bool X264EncoderImpl::Initialize(const IEncoder::Config& config) {
     param.rc.i_vbv_max_bitrate = static_cast<int>(config.bitrate * 1.5);
     param.rc.i_vbv_buffer_size = config.bitrate;
 
-    // WebRTC-friendly GOP
-    param.i_keyint_max = config.fps * 2;  // Keyframe every 2 seconds
-    param.i_keyint_min = config.fps;
-    param.b_intra_refresh = 1;
+    // WebRTC-friendly GOP: Force IDR every 1 second
+    param.i_keyint_max = config.fps;       // IDR every 1 second
+    param.i_keyint_min = config.fps;       // Min = max (disable scenecut)
+    param.b_intra_refresh = 0;             // CRITICAL: Disable gradual refresh, use full IDR
+    param.i_scenecut_threshold = 0;        // Disable scene-cut detection
 
     // Low latency settings
     param.i_threads = 4;
@@ -52,9 +56,9 @@ bool X264EncoderImpl::Initialize(const IEncoder::Config& config) {
     param.i_sync_lookahead = 0;
     param.rc.i_lookahead = 0;
 
-    // Annex B output (needed for RTP)
+    // Annex B output with SPS/PPS headers
     param.b_annexb = 1;
-    param.b_repeat_headers = 1;
+    param.b_repeat_headers = 1;            // CRITICAL: Emit SPS/PPS before each IDR
 
     // Profile
     param.i_csp = X264_CSP_I420;
@@ -65,6 +69,14 @@ bool X264EncoderImpl::Initialize(const IEncoder::Config& config) {
     if (!encoder_) {
         return false;
     }
+    
+    // PHASE 1 & 2: Log encoder lifecycle and final params
+    printf("[X264] INIT this=%p fps=%d keyint_max=%d keyint_min=%d intra_refresh=%d repeat_headers=%d scenecut=%d\n",
+           this, config.fps, param.i_keyint_max, param.i_keyint_min, 
+           param.b_intra_refresh, param.b_repeat_headers, param.i_scenecut_threshold);
+    printf("[X264] FINAL PARAMS after x264_encoder_open: i_keyint_max=%d i_keyint_min=%d b_intra_refresh=%d i_scenecut_threshold=%d b_repeat_headers=%d b_annexb=%d\n",
+           param.i_keyint_max, param.i_keyint_min, param.b_intra_refresh, 
+           param.i_scenecut_threshold, param.b_repeat_headers, param.b_annexb);
 
     // Allocate picture
     if (x264_picture_alloc(&picture_in_, X264_CSP_I420, config.width, config.height) < 0) {
@@ -97,6 +109,35 @@ std::vector<uint8_t> X264EncoderImpl::Encode(const uint8_t* bgra_data, int64_t t
     int frame_size = x264_encoder_encode(encoder_, &nals, &num_nals, &picture_in_, &pic_out);
 
     if (frame_size > 0) {
+        // PHASE 3: Count NAL types and detect first SPS/PPS/IDR
+        static std::map<int, int> nal_counts;
+        static std::map<int, bool> nal_seen;
+        static int64_t last_log_ts = 0;
+        
+        for (int i = 0; i < num_nals; i++) {
+            int nal_type = nals[i].i_type;
+            nal_counts[nal_type]++;
+            
+            // First time seeing critical NAL types
+            if ((nal_type == 5 || nal_type == 7 || nal_type == 8) && !nal_seen[nal_type]) {
+                nal_seen[nal_type] = true;
+                printf("[X264] FIRST NAL TYPE %d detected at timestamp %lld ms (size=%d bytes)\\n", 
+                       nal_type, timestamp_ms, nals[i].i_payload);
+            }
+        }
+        
+        // Log NAL counts every second
+        int64_t current_sec = timestamp_ms / 1000;
+        if (current_sec > last_log_ts) {
+            printf("[X264] NAL counts per second: ");
+            for (const auto& pair : nal_counts) {
+                printf("type_%d=%d ", pair.first, pair.second);
+            }
+            printf("\\n");
+            nal_counts.clear();
+            last_log_ts = current_sec;
+        }
+        
         // Collect all NAL units (Annex B format)
         for (int i = 0; i < num_nals; i++) {
             output.insert(output.end(), nals[i].p_payload, nals[i].p_payload + nals[i].i_payload);
@@ -107,6 +148,7 @@ std::vector<uint8_t> X264EncoderImpl::Encode(const uint8_t* bgra_data, int64_t t
 }
 
 void X264EncoderImpl::Cleanup() {
+    printf("[X264] CLEANUP this=%p\n", this);
     if (encoder_) {
         // Flush delayed frames
         while (x264_encoder_delayed_frames(encoder_)) {

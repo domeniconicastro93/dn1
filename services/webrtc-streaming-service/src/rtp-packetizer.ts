@@ -32,12 +32,16 @@ export class RTPPacketizer {
      */
     packetize(nalUnit: NALUnit): RTPPacket[] {
         const packets: RTPPacket[] = [];
+        console.log(`[Packetizer] Input NAL: type=${nalUnit.type} len=${nalUnit.data.length}`);
+
+        // Determine if this is a slice (IDR or non-IDR)
+        const isSlice = nalUnit.type === 1 || nalUnit.type === 5;
 
         // Small NAL units: Single NAL Unit Mode
         if (nalUnit.data.length <= this.maxPayloadSize) {
             packets.push({
                 payload: nalUnit.data,
-                marker: true, // End of frame
+                marker: isSlice, // Marker only on slices, not on SPS/PPS/AUD/SEI
                 timestamp: this.timestamp
             });
         }
@@ -50,16 +54,18 @@ export class RTPPacketizer {
 
                 packets.push({
                     payload: fragment,
-                    marker: isLast, // Mark last fragment
+                    marker: isLast && isSlice, // Marker on last fragment of slices only
                     timestamp: this.timestamp
                 });
             });
         }
 
-        // Advance timestamp for next frame
-        // timestamp increment = 90000 / fps
-        const timestampIncrement = Math.floor(this.clockRate / this.fps);
-        this.timestamp += timestampIncrement;
+        // Advance timestamp ONLY for slices (actual picture data)
+        // Non-slice NALs (SPS/PPS/AUD/SEI) use same timestamp as next slice
+        if (isSlice) {
+            const timestampIncrement = Math.floor(this.clockRate / this.fps);
+            this.timestamp += timestampIncrement;
+        }
 
         return packets;
     }

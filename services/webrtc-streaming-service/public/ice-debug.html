@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>WebRTC ICE & Stats Debug</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+        }
+
+        video {
+            width: 640px;
+            height: 480px;
+            background: #000;
+            border: 2px solid #333;
+        }
+
+        .log {
+            white-space: pre-wrap;
+            background: #f0f0f0;
+            padding: 10px;
+            margin: 10px 0;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .stats {
+            background: #e0ffe0;
+            padding: 10px;
+            margin: 10px 0;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>WebRTC ICE & Stats Debug</h2>
+    <button id="startBtn" onclick="startStream()">Start Stream</button>
+    <br><br>
+    <video id="remoteVideo" autoplay playsinline muted></video>
+
+    <div class="stats" id="stats">Stats will appear here...</div>
+    <div class="log" id="log">Logs will appear here...</div>
+
+    <script>
+        let pc;
+        const sessionId = 'browser-' + Date.now();
+        const serverUrl = 'http://localhost:3015';
+        const logDiv = document.getElementById('log');
+        const statsDiv = document.getElementById('stats');
+
+        function log(msg) {
+            const timestamp = new Date().toISOString().substr(11, 12);
+            logDiv.textContent += `[${timestamp}] ${msg}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(msg);
+        }
+
+        async function startStream() {
+            log(`🚀 Starting session: ${sessionId}`);
+
+            // Create peer connection
+            pc = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+
+            // PHASE 1: Log ICE state changes
+            pc.oniceconnectionstatechange = () => {
+                log(`[ICE] iceConnectionState: ${pc.iceConnectionState}`);
+            };
+
+            pc.onconnectionstatechange = () => {
+                log(`[CONN] connectionState: ${pc.connectionState}`);
+            };
+
+            // Handle remote track
+            pc.ontrack = (event) => {
+                log(`✓ Track received: ${event.track.kind}`);
+                document.getElementById('remoteVideo').srcObject = event.streams[0];
+
+                // PHASE 5: Start stats monitoring
+                setInterval(async () => {
+                    const stats = await pc.getStats();
+                    let framesDecoded = 0, framesReceived = 0, packetsReceived = 0, bytesReceived = 0;
+                    let codecMime = 'unknown';
+
+                    stats.forEach(report => {
+                        if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                            framesDecoded = report.framesDecoded || 0;
+                            framesReceived = report.framesReceived || 0;
+                            packetsReceived = report.packetsReceived || 0;
+                            bytesReceived = report.bytesReceived || 0;
+                            codecMime = report.mimeType || 'unknown';
+                        }
+                    });
+
+                    statsDiv.innerHTML =
+                        `<b>BROWSER STATS (inbound-rtp):</b>\n` +
+                        `Frames Decoded: ${framesDecoded}\n` +
+                        `Frames Received: ${framesReceived}\n` +
+                        `Packets Received: ${packetsReceived}\n` +
+                        `Bytes Received: ${bytesReceived}\n` +
+                        `Codec: ${codecMime}\n` +
+                        `ICE: ${pc.iceConnectionState} | Conn: ${pc.connectionState}`;
+                }, 1000);
+            };
+
+            // Request offer
+            log('📡 Requesting offer...');
+            const res1 = await fetch(`${serverUrl}/webrtc/session/${sessionId}/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ width: 1280, height: 720, fps: 30, bitrate: 3000 })
+            });
+            const { offer } = await res1.json();
+            log('✓ Offer received');
+
+            await pc.setRemoteDescription(offer);
+            log('✓ setRemoteDescription(offer) done');
+
+            // Create answer
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            log(`✓ Answer created`);
+
+            // Send answer
+            await fetch(`${serverUrl}/webrtc/session/${sessionId}/answer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ answer })
+            });
+            log('✓ Answer sent to server');
+
+            // Send ICE candidates
+            pc.onicecandidate = async (event) => {
+                if (event.candidate) {
+                    log(`🧊 ICE candidate: ${event.candidate.candidate.substring(0, 50)}...`);
+                    await fetch(`${serverUrl}/webrtc/session/${sessionId}/ice`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ candidate: event.candidate })
+                    });
+                } else {
+                    log('🧊 ICE gathering complete');
+                }
+            };
+        }
+    </script>
+</body>
+
+</html>

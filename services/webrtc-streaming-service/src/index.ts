@@ -1,6 +1,15 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { WebRTCPeer, StreamConfig } from './webrtc-peer';
+import fastifyStatic from '@fastify/static';
+import path from 'path';
+
+function logAPI(req: any, endpoint: string) {
+    const sessionId = (req.params as any).sessionId || 'unknown';
+    const remoteAddr = req.ip || req.socket.remoteAddress || 'unknown';
+    const userAgent = req.headers['user-agent'] || 'unknown';
+    console.log(`[API] ${req.method} ${endpoint} sessionId=${sessionId} remoteAddr=${remoteAddr} userAgent=${userAgent} t=${Date.now()}`);
+}
 
 // Add FFmpeg to PATH
 const FFMPEG_PATH = 'C:\\ffmpeg\\bin';
@@ -20,12 +29,34 @@ const app = Fastify({
 });
 
 // CORS
-app.register(cors, {
+app.register(cors as any, {
     origin: true
 });
 
+// Serve static files (Phase 0: HTTP tests)
+app.register(fastifyStatic as any, {
+    root: path.join(__dirname, '../public'),
+    prefix: '/public/' // http://localhost:3015/public/webrtc-test.html
+});
+
+// Global request/response logging
+app.addHook('onRequest', async (request, reply) => {
+    // app.log.info({ method: request.method, url: request.url }, '[REQ] incoming');
+});
+app.addHook('onResponse', async (request, reply) => {
+    // app.log.info({ method: request.method, url: request.url, status: reply.statusCode }, '[REQ] completed');
+});
+
+// Timeout helper to prevent indefinite hangs
+const withTimeout = <T>(p: Promise<T>, ms: number, label: string): Promise<T> =>
+    Promise.race([
+        p,
+        new Promise<T>((_, rej) => setTimeout(() => rej(new Error('TIMEOUT: ' + label)), ms))
+    ]);
+
 // Active WebRTC peers (sessionId -> WebRTCPeer)
 const activePeers = new Map<string, WebRTCPeer>();
+const iceCandidates = new Map<string, any[]>(); // Store server ICE candidates per session
 
 /**
  * Health check
@@ -49,9 +80,11 @@ app.get('/health', async (request, reply) => {
  * Returns: { offer: any }
  */
 app.post('/webrtc/session/:sessionId/start', async (request, reply) => {
+    logAPI(request, '/webrtc/session/:sessionId/start');
     const { sessionId } = request.params as { sessionId: string };
     const config = request.body as Partial<StreamConfig>;
 
+    app.log.info({ sessionId }, '[START] entered handler');
     app.log.info({ sessionId }, 'Starting WebRTC session');
 
     try {
@@ -65,16 +98,21 @@ app.post('/webrtc/session/:sessionId/start', async (request, reply) => {
         };
 
         // Create WebRTC peer
+        app.log.info({ sessionId }, '[START] step 1: creating WebRTCPeer');
         const peer = new WebRTCPeer(sessionId, streamConfig);
+        app.log.info({ sessionId }, '[START] step 1 done');
 
         // Handle ICE candidates
         peer.on('icecandidate', (candidate) => {
-            app.log.info({ sessionId }, 'ICE candidate generated (client should poll /ice endpoint)');
-            // In a real implementation, you'd send this via WebSocket or store for polling
+            if (!iceCandidates.has(sessionId)) {
+                iceCandidates.set(sessionId, []);
+            }
+            iceCandidates.get(sessionId)!.push(candidate);
+            app.log.info({ sessionId }, `Server ICE candidate stored (total: ${iceCandidates.get(sessionId)!.length})`);
         });
 
         // Handle connection state changes
-        peer.on('connectionstatechange', (state) => {
+        peer.on('connectionstatechange', (state: any) => {
             app.log.info({ sessionId, state }, 'Connection state changed');
 
             if (state === 'failed' || state === 'closed') {
@@ -83,7 +121,21 @@ app.post('/webrtc/session/:sessionId/start', async (request, reply) => {
         });
 
         // Create offer
-        const offer = await peer.createOffer();
+        app.log.info({ sessionId }, '[START] step 2: calling createOffer');
+        const offer = await withTimeout(peer.createOffer(), 5000, 'createOffer');
+        app.log.info({ sessionId }, '[START] step 2 done');
+
+        // PHASE 2: Codec Negotiation Log
+        if (offer && offer.sdp) {
+            const videoLines = offer.sdp.split('\r\n').filter((l: string) =>
+                l.startsWith('m=video') ||
+                l.startsWith('a=rtpmap') ||
+                l.startsWith('a=fmtp') ||
+                l.startsWith('a=rtcp-fb') ||
+                l.startsWith('a=ssrc')
+            );
+            console.log(`[SDP-OFFER][${sessionId}]`, videoLines.join('\n'));
+        }
 
         // Store peer
         activePeers.set(sessionId, peer);
@@ -111,10 +163,23 @@ app.post('/webrtc/session/:sessionId/start', async (request, reply) => {
  * Body: { answer: RTCSessionDescriptionInit }
  */
 app.post('/webrtc/session/:sessionId/answer', async (request, reply) => {
+    logAPI(request, '/webrtc/session/:sessionId/answer');
     const { sessionId } = request.params as { sessionId: string };
     const { answer } = request.body as { answer: any };
 
     app.log.info({ sessionId }, 'Received WebRTC answer');
+
+    // PHASE 2: Codec Negotiation Log (Answer)
+    if (answer && answer.sdp) {
+        const videoLines = answer.sdp.split('\r\n').filter((l: string) =>
+            l.startsWith('m=video') ||
+            l.startsWith('a=rtpmap') ||
+            l.startsWith('a=fmtp') ||
+            l.startsWith('a=rtcp-fb') ||
+            l.startsWith('a=ssrc')
+        );
+        console.log(`[SDP-ANSWER][${sessionId}]`, videoLines.join('\n'));
+    }
 
     const peer = activePeers.get(sessionId);
     if (!peer) {
@@ -149,6 +214,7 @@ app.post('/webrtc/session/:sessionId/answer', async (request, reply) => {
  * Body: { candidate: RTCIceCandidateInit }
  */
 app.post('/webrtc/session/:sessionId/ice', async (request, reply) => {
+    logAPI(request, '/webrtc/session/:sessionId/ice');
     const { sessionId } = request.params as { sessionId: string };
     const { candidate } = request.body as { candidate: any };
 
@@ -177,11 +243,23 @@ app.post('/webrtc/session/:sessionId/ice', async (request, reply) => {
 });
 
 /**
+ * Get server ICE candidates (for browser polling)
+ */
+app.get('/webrtc/session/:sessionId/candidates', async (request, reply) => {
+    logAPI(request, '/webrtc/session/:sessionId/candidates');
+    const { sessionId } = request.params as { sessionId: string };
+    const candidates = iceCandidates.get(sessionId) || [];
+    iceCandidates.set(sessionId, []);
+    return { success: true, candidates };
+});
+
+/**
  * Stop WebRTC session
  * 
  * POST /webrtc/session/:sessionId/stop
  */
 app.post('/webrtc/session/:sessionId/stop', async (request, reply) => {
+    logAPI(request, '/webrtc/session/:sessionId/stop');
     const { sessionId } = request.params as { sessionId: string };
 
     app.log.info({ sessionId }, 'Stopping WebRTC session');
@@ -190,6 +268,7 @@ app.post('/webrtc/session/:sessionId/stop', async (request, reply) => {
     if (peer) {
         peer.close();
         activePeers.delete(sessionId);
+        iceCandidates.delete(sessionId);
     }
 
     return {
