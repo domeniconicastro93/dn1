@@ -5,7 +5,7 @@
  * Ensures single source of truth for WebRTC session management
  */
 
-const WEBRTC_SERVICE_URL = process.env.WEBRTC_SERVICE_URL || 'http://20.31.130.73:3015';
+const WEBRTC_SERVICE_URL = process.env.WEBRTC_SERVICE_URL || 'http://108.142.237.74:3015';
 
 export interface WebRTCSessionConfig {
     width?: number;
@@ -39,9 +39,15 @@ export class WebRTCClient {
     ): Promise<{ offer: any }> {
         const { width = 1920, height = 1080, fps = 60, bitrate = 10000 } = config;
 
-        console.log('[WebRTCClient] Starting session:', sessionId);
+        console.log('[ORCH → VM] calling WebRTC start at', this.serviceUrl);
+        console.log('[ORCH → VM] sessionId=', sessionId);
+        console.log('[ORCH → VM] expected bitrate=', bitrate);
+        console.log('[ORCH → VM] resolution=', `${width}x${height}@${fps}fps`);
 
-        const response = await fetch(`${this.serviceUrl}/webrtc/session/${sessionId}/start`, {
+        const targetUrl = `${this.serviceUrl}/webrtc/session/${sessionId}/start`;
+        console.log('[ORCH → VM] Full URL:', targetUrl);
+
+        const response = await fetch(targetUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ width, height, fps, bitrate }),
@@ -49,11 +55,18 @@ export class WebRTCClient {
 
         if (!response.ok) {
             const error = await response.text();
+            console.error('[ORCH → VM] ❌ WebRTC service error:', response.status, error);
             throw new Error(`WebRTC service error (${response.status}): ${error}`);
         }
 
         const data: any = await response.json();
         console.log('[WebRTCClient] ✅ Session started, offer received');
+
+        // Log SDP details
+        if (data.offer && data.offer.sdp) {
+            console.log('[SDP OFFER SIZE]=', data.offer.sdp.length, 'chars');
+            console.log('[SDP OFFER SNIPPET]=', data.offer.sdp.substring(0, 200));
+        }
 
         return { offer: data.offer };
     }

@@ -43,22 +43,39 @@ export function WebRTCStreamPlayer({
 
                 pcRef.current = pc;
 
+                // ICE retry state
+                let iceRetryCount = 0;
+                const MAX_ICE_RETRIES = 8;
+                let iceRetryInterval: NodeJS.Timeout | null = null;
+
                 // Track connection state
                 pc.onconnectionstatechange = () => {
                     const state = pc?.connectionState || 'new';
                     console.log('[WebRTCStreamPlayer] 🔄 Connection state:', state);
+                    console.log('[Peer connectionState]=', state);
                     setConnectionState(state);
 
                     if (state === 'connected') {
                         console.log('[WebRTCStreamPlayer] ✅ PEER CONNECTION ESTABLISHED');
+                        // Stop ICE retry loop
+                        if (iceRetryInterval) {
+                            clearInterval(iceRetryInterval);
+                            iceRetryInterval = null;
+                        }
                     } else if (state === 'failed') {
                         console.error('[WebRTCStreamPlayer] ❌ PEER CONNECTION FAILED');
+                        if (iceRetryInterval) {
+                            clearInterval(iceRetryInterval);
+                            iceRetryInterval = null;
+                        }
                     }
                 };
 
                 // Track ICE connection state
                 pc.oniceconnectionstatechange = () => {
-                    console.log('[WebRTCStreamPlayer] 🧊 ICE connection state:', pc?.iceConnectionState);
+                    const iceState = pc?.iceConnectionState;
+                    console.log('[WebRTCStreamPlayer] 🧊 ICE connection state:', iceState);
+                    console.log('[ICE connectionState]=', iceState);
                 };
 
                 // Handle ICE candidates
@@ -70,7 +87,7 @@ export function WebRTCStreamPlayer({
                         setIceCandidateCount(candidateCount);
 
                         try {
-                            const webrtcServiceUrl = process.env.NEXT_PUBLIC_WEBRTC_SERVICE_URL || 'http://20.31.130.73:3015';
+                            const webrtcServiceUrl = process.env.NEXT_PUBLIC_WEBRTC_SERVICE_URL || 'http://108.142.237.74:3015';
                             await fetch(`${webrtcServiceUrl}/webrtc/session/${sessionId}/ice`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
@@ -96,6 +113,7 @@ export function WebRTCStreamPlayer({
                         videoRef.current.srcObject = event.streams[0];
                         setVideoFrameDetected(true);
                         console.log('[WebRTCStreamPlayer] ✅ Video stream attached to <video> element');
+                        console.log('[VIDEO TRACK]= received');
 
                         // Monitor for actual video frames
                         const stream = event.streams[0];
@@ -107,7 +125,15 @@ export function WebRTCStreamPlayer({
                             // Listen for first frame
                             videoRef.current.onloadeddata = () => {
                                 console.log('[WebRTCStreamPlayer] 🎬 VIDEO FRAMES FLOWING - First frame rendered!');
+                                console.log('[VIDEO TRACK]= active and rendering');
                             };
+
+                            // Timeout check for black screen (2 seconds)
+                            setTimeout(() => {
+                                if (videoRef.current && videoRef.current.videoWidth === 0) {
+                                    console.warn('[WebRTCStreamPlayer] ⚠️ Video track received but no frames after 2s - possible black screen');
+                                }
+                            }, 2000);
                         }
                     }
                 };
@@ -115,7 +141,7 @@ export function WebRTCStreamPlayer({
                 // STEP 1: Get SDP Offer from orchestrator/webrtc-service
                 console.log('[WebRTCStreamPlayer] Fetching SDP offer...');
 
-                const webrtcServiceUrl = process.env.NEXT_PUBLIC_WEBRTC_SERVICE_URL || 'http://20.31.130.73:3015';
+                const webrtcServiceUrl = process.env.NEXT_PUBLIC_WEBRTC_SERVICE_URL || 'http://108.142.237.74:3015';
                 const startResponse = await fetch(`${webrtcServiceUrl}/webrtc/session/${sessionId}/start`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -151,6 +177,36 @@ export function WebRTCStreamPlayer({
 
                 console.log('[WebRTCStreamPlayer] ✅ Answer sent');
                 console.log('[WebRTCStreamPlayer] === STREAM SETUP COMPLETE ===');
+
+                // STEP 5: ICE Connection Retry Loop
+                console.log('[WebRTCStreamPlayer] Starting ICE retry loop...');
+
+                iceRetryInterval = setInterval(() => {
+                    iceRetryCount++;
+                    const candidateCount = iceCandidateCount;
+                    const peerState = pc?.connectionState || 'unknown';
+                    const iceState = pc?.iceConnectionState || 'unknown';
+
+                    console.log(`[ICE attempt #${iceRetryCount}]`);
+                    console.log(`[ICE candidates count]= ${candidateCount}`);
+                    console.log(`[Peer connectionState]= ${peerState}`);
+                    console.log(`[ICE connectionState]= ${iceState}`);
+
+                    if (peerState === 'connected' && iceState === 'connected') {
+                        console.log('[WebRTCStreamPlayer] ✅ ICE CONNECTED - stopping retry loop');
+                        if (iceRetryInterval) {
+                            clearInterval(iceRetryInterval);
+                            iceRetryInterval = null;
+                        }
+                    } else if (iceRetryCount >= MAX_ICE_RETRIES) {
+                        console.error('[WebRTCStreamPlayer] ❌ ICE retry limit reached. Connection failed.');
+                        if (iceRetryInterval) {
+                            clearInterval(iceRetryInterval);
+                            iceRetryInterval = null;
+                        }
+                        setError('ICE connection timeout - max retries reached');
+                    }
+                }, 1000);  // Check every 1 second
 
             } catch (err: any) {
                 console.error('[WebRTCStreamPlayer] === ERROR ===', err);
