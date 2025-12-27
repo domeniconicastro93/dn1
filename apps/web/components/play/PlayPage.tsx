@@ -20,7 +20,7 @@ function coerceStatus(value: unknown): GameSession['status'] {
 import dynamic from 'next/dynamic';
 
 // ✅ NEW: Real WebRTC streaming (replaces Apollo)
-const WebRTCStreamPlayer = dynamic(() => import('../../src/components/WebRTCStreamPlayer').then(m => ({ default: m.WebRTCStreamPlayer })), {
+const WebRTCStreamPlayer = dynamic(() => import('../WebRTCStreamPlayer').then(m => ({ default: m.WebRTCStreamPlayer })), {
   ssr: false,
   loading: () => (
     <div className="min-h-screen bg-black flex items-center justify-center">

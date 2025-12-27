@@ -177,6 +177,7 @@ export function registerSessionRoutes(app: FastifyInstance) {
                 // STEP 2: Launch Steam game (if steamAppId provided)
                 if (steamAppId) {
                     console.log('[SessionRoute/Alias] Step 2: Launching Steam game:', steamAppId);
+                    console.log('[SessionRoute/Alias] 🎮 VM Host:', process.env.VM_AGENT_URL);
 
                     const launchResult = await vmAgentClient.launchGame(steamAppId);
 
@@ -191,6 +192,7 @@ export function registerSessionRoutes(app: FastifyInstance) {
                     }
 
                     console.log('[SessionRoute/Alias] ✅ Game launched successfully');
+                    console.log('[SessionRoute/Alias] 🎯 Game process should now be visible on VM desktop');
 
                     // STEP 3: Wait for game to initialize
                     console.log(`[SessionRoute/Alias] Step 3: Waiting ${LAUNCH_DELAY_MS}ms for game initialization...`);
@@ -201,8 +203,13 @@ export function registerSessionRoutes(app: FastifyInstance) {
 
                 // STEP 4: Start WebRTC stream capture
                 console.log('[SessionRoute/Alias] Step 4: Starting WebRTC stream capture...');
+                console.log('[SessionRoute/Alias] 📡 WebRTC Service URL:', webrtcClient.getServiceUrl());
+
                 const { offer } = await webrtcClient.startSession(sessionId);
 
+                console.log('[SessionRoute/Alias] ✅ SDP Offer received');
+                console.log('[SessionRoute/Alias] 📊 SDP Offer type:', offer?.type);
+                console.log('[SessionRoute/Alias] 📊 SDP length:', offer?.sdp?.length || 0, 'chars');
                 console.log('[SessionRoute/Alias] ✅ Complete Play Now flow successful!');
                 console.log('[SessionRoute/Alias] === PLAY NOW FLOW END ===');
 

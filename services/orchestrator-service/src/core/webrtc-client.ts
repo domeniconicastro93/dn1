@@ -5,7 +5,7 @@
  * Ensures single source of truth for WebRTC session management
  */
 
-const WEBRTC_SERVICE_URL = process.env.WEBRTC_SERVICE_URL || 'http://localhost:3015';
+const WEBRTC_SERVICE_URL = process.env.WEBRTC_SERVICE_URL || 'http://20.31.130.73:3015';
 
 export interface WebRTCSessionConfig {
     width?: number;
