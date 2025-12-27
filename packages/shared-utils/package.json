@@ -11,7 +11,7 @@
     "@fastify/rate-limit": "^9.1.0",
     "@strike/shared-types": "workspace:*",
     "jsonwebtoken": "^9.0.2",
-    "zod": "^3.22.4"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.5",

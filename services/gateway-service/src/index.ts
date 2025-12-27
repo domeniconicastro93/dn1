@@ -361,6 +361,40 @@ app.register(httpProxy as any, {
   upstream: process.env.STEAM_LIBRARY_SERVICE_URL || "http://localhost:3022",
   prefix: "/api/steam/v1/callback",
   rewritePrefix: "/callback",
+  preHandler: [
+    async (request: any, reply: any) => {
+      console.log('[GATEWAY CALLBACK] ============================================');
+      console.log('[GATEWAY CALLBACK] Steam OpenID callback received');
+      console.log('[GATEWAY CALLBACK] URL:', request.url);
+      console.log('[GATEWAY CALLBACK] Correlation ID:', request.correlationId);
+      console.log('[GATEWAY CALLBACK] Has Authorization header:', !!request.headers.authorization);
+      console.log('[GATEWAY CALLBACK] Has Cookie header:', !!request.headers.cookie);
+
+      // Try to extract and decode JWT from cookies
+      if (request.headers.cookie) {
+        const cookieHeader = request.headers.cookie;
+        const tokenMatch = cookieHeader.match(/strike_access_token=([^;]+)/);
+        if (tokenMatch) {
+          try {
+            const token = tokenMatch[1];
+            console.log('[GATEWAY CALLBACK] JWT found in cookies');
+            // Decode without verification (just to see userId)
+            const parts = token.split('.');
+            if (parts.length === 3) {
+              const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+              console.log('[GATEWAY CALLBACK] Decoded userId:', payload.userId);
+              console.log('[GATEWAY CALLBACK] Decoded email:', payload.email);
+            }
+          } catch (e: any) {
+            console.error('[GATEWAY CALLBACK] Failed to decode JWT:', e.message);
+          }
+        } else {
+          console.error('[GATEWAY CALLBACK] ❌ No strike_access_token in cookies!');
+        }
+      }
+      console.log('[GATEWAY CALLBACK] ============================================');
+    }
+  ],
   http2: false,
   // Ensure cookies are forwarded for user identification
   replyOptions: {
@@ -383,28 +417,70 @@ app.register(httpProxy as any, {
   http2: false,
 });
 
-// 3) Steam owned-games endpoint (protected) - Returns user's Steam library
+// 2b) Steam Disconnect (protected) - Removes Steam account link
+app.register(httpProxy as any, {
+  upstream: process.env.AUTH_SERVICE_URL || "http://localhost:3001",
+  prefix: "/api/steam/v1/disconnect",
+  rewritePrefix: "/api/auth/v1/steam/disconnect",
+  preHandler: [jwtValidationMiddleware as any],
+  http2: false,
+  replyOptions: {
+    rewriteRequestHeaders: (originalReq: any, headers: any) => {
+      const forwardHeaders = { ...headers };
+      if (originalReq.headers.authorization) {
+        forwardHeaders.authorization = originalReq.headers.authorization;
+      }
+      if ((originalReq as any).correlationId) {
+        forwardHeaders['x-correlation-id'] = (originalReq as any).correlationId;
+      }
+      return forwardHeaders;
+    },
+  },
+});
+
+// 3a) CANONICAL: Steam owned-games endpoint
+// /api/steam/v1/steam/owned-games -> /api/steam/owned-games
+app.register(httpProxy as any, {
+  upstream: process.env.STEAM_LIBRARY_SERVICE_URL || "http://localhost:3022",
+  prefix: "/api/steam/v1/steam/owned-games",
+  rewritePrefix: "/api/steam/owned-games",
+  preHandler: [
+    jwtValidationMiddleware as any,
+    async (request: any) => {
+      console.log('[GATEWAY TRACE] Canonical Steam Request');
+      console.log('[GATEWAY TRACE] URL:', request.url);
+      console.log('[GATEWAY TRACE] User:', request.user?.userId);
+    }
+  ],
+  http2: false,
+  replyOptions: {
+    rewriteRequestHeaders: (originalReq: any, headers: any) => {
+      const forwardHeaders = { ...headers };
+      if (originalReq.headers.authorization) {
+        forwardHeaders.authorization = originalReq.headers.authorization;
+      }
+      if ((originalReq as any).correlationId) {
+        forwardHeaders['x-correlation-id'] = (originalReq as any).correlationId;
+      }
+      return forwardHeaders;
+    },
+  },
+});
+
+// 3b) COMPATIBILITY: Legacy owned-games endpoint
+// /api/steam/v1/owned-games -> /api/steam/owned-games
 app.register(httpProxy as any, {
   upstream: process.env.STEAM_LIBRARY_SERVICE_URL || "http://localhost:3022",
   prefix: "/api/steam/v1/owned-games",
   rewritePrefix: "/api/steam/owned-games",
   preHandler: [jwtValidationMiddleware as any],
   http2: false,
-  // Ensure Authorization header is forwarded
   replyOptions: {
     rewriteRequestHeaders: (originalReq: any, headers: any) => {
       const forwardHeaders = { ...headers };
-
-      // Ensure Authorization is forwarded
       if (originalReq.headers.authorization) {
         forwardHeaders.authorization = originalReq.headers.authorization;
       }
-
-      // Forward correlation ID
-      if ((originalReq as any).correlationId) {
-        forwardHeaders['x-correlation-id'] = (originalReq as any).correlationId;
-      }
-
       return forwardHeaders;
     },
   },
@@ -419,6 +495,31 @@ app.register(httpProxy as any, {
   http2: false,
 });
 
+// 4b) Steam-specific routes (debug, status, etc.)
+// /api/steam/v1/steam/* -> /api/steam/*
+app.register(httpProxy as any, {
+  upstream: process.env.STEAM_LIBRARY_SERVICE_URL || "http://localhost:3022",
+  prefix: "/api/steam/v1/steam",
+  rewritePrefix: "/api/steam",
+  preHandler: [jwtValidationMiddleware as any],
+  http2: false,
+  replyOptions: {
+    rewriteRequestHeaders: (originalReq: any, headers: any) => {
+      const forwardHeaders = { ...headers };
+      if (originalReq.headers.authorization) {
+        forwardHeaders.authorization = originalReq.headers.authorization;
+      }
+      if (originalReq.headers.cookie) {
+        forwardHeaders.cookie = originalReq.headers.cookie;
+      }
+      if ((originalReq as any).correlationId) {
+        forwardHeaders['x-correlation-id'] = (originalReq as any).correlationId;
+      }
+      return forwardHeaders;
+    },
+  },
+});
+
 // 5) Catch-all steam routes (protected)
 // This handles any other /api/steam/v1/* requests not matched above
 app.register(httpProxy as any, {
@@ -427,6 +528,21 @@ app.register(httpProxy as any, {
   rewritePrefix: "/api",
   preHandler: [jwtValidationMiddleware as any],
   http2: false,
+  replyOptions: {
+    rewriteRequestHeaders: (originalReq: any, headers: any) => {
+      const forwardHeaders = { ...headers };
+      if (originalReq.headers.authorization) {
+        forwardHeaders.authorization = originalReq.headers.authorization;
+      }
+      if (originalReq.headers.cookie) {
+        forwardHeaders.cookie = originalReq.headers.cookie;
+      }
+      if ((originalReq as any).correlationId) {
+        forwardHeaders['x-correlation-id'] = (originalReq as any).correlationId;
+      }
+      return forwardHeaders;
+    },
+  },
 });
 
 // ---------------------

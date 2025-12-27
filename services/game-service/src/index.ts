@@ -11,9 +11,11 @@ import {
   ErrorCodes,
   RateLimitConfigs,
   rateLimiter,
+} from '@strike/shared-utils';
+import {
   gameListQuerySchema,
   gameSlugParamSchema,
-} from '@strike/shared-utils';
+} from './validation';
 import { prisma } from '@strike/shared-db';
 import type {
   GameDTO,

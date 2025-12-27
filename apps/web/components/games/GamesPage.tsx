@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
-import { Search } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { SteamUserLibraryEntry } from '@strike/shared-types';
 import { GameCard } from './GameCard';
 import { cn } from '@/lib/utils';
@@ -27,22 +27,35 @@ export function GamesPage() {
   const [privacyState, setPrivacyState] = useState<'public' | 'private' | 'friendsOnly' | 'unknown'>('unknown');
   const [loading, setLoading] = useState(true);
 
+  // Pagination State
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const pageSize = 20;
+
+  // Dropdown State
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
-        // Fetch Catalog
-        const gamesRes = await fetch(`${apiUrl}/api/game/v1`);
+        // Fetch Catalog with Pagination
+        const gamesRes = await fetch(`${apiUrl}/api/game/v1?page=${page}&pageSize=${pageSize}`);
         if (gamesRes.ok) {
           const data = await gamesRes.json();
           if (data.data && data.data.games) {
             setGames(data.data.games);
+            // Calculate total pages
+            const total = data.data.total || 0;
+            setTotalPages(Math.ceil(total / pageSize));
           }
         }
 
-        // Fetch Owned Games (if logged in)
+        // Fetch Owned Games (if logged in) - only on first load or if status changes
+        // We don't need to re-fetch owned games on every page change, but for simplicity we keep it here
+        // Optimization: Check if we already have ownedGameIds and only fetch if empty or forced
         try {
           console.log('[GamesPage] Fetching Steam owned games...');
           const data = await fetchSteamOwnedGames();
@@ -79,7 +92,14 @@ export function GamesPage() {
     };
 
     fetchData();
-  }, []);
+  }, [page]); // Re-run when page changes
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      setPage(newPage);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#080427] py-8">
@@ -121,13 +141,53 @@ export function GamesPage() {
               </button>
             </div>
           ) : steamStatus.linked ? (
-            <div className="mb-8 p-4 bg-green-900/30 border border-green-500/30 rounded-xl flex items-center justify-between">
+            <div className="mb-8 p-4 bg-green-900/30 border border-green-500/30 rounded-xl flex items-center justify-between relative">
               <span className="text-green-200">Steam Connected</span>
-              <button
-                className="px-4 py-2 bg-green-600/50 rounded-lg text-white text-sm font-semibold cursor-default"
-              >
-                Connected
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  className="px-4 py-2 bg-green-600 rounded-lg text-white text-sm font-semibold hover:bg-green-500 transition flex items-center gap-2"
+                >
+                  Connected
+                  <svg className={`w-4 h-4 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {/* Dropdown Menu */}
+                {isDropdownOpen && (
+                  <div
+                    className="absolute right-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50"
+                  >
+                    <button
+                      onClick={async () => {
+                        try {
+                          // Call disconnect API
+                          const res = await fetch('/api/steam/disconnect', {
+                            method: 'POST',
+                            credentials: 'include',
+                          });
+
+                          if (res.ok) {
+                            // Reload page to reflect disconnected state
+                            window.location.reload();
+                          } else {
+                            console.error('Failed to disconnect Steam');
+                          }
+                        } catch (error) {
+                          console.error('Error disconnecting Steam:', error);
+                        }
+                      }}
+                      className="w-full px-4 py-3 text-left text-red-400 hover:bg-gray-800 rounded-lg transition flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      Disconnetti
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           ) : null}
 
@@ -199,26 +259,66 @@ export function GamesPage() {
             <p className="text-gray-400 text-lg">No games available yet</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {games.map((game) => {
-              // Strict ownership check: game.steamAppId MUST match an owned ID
-              const isOwned = game.steamAppId ? ownedGameIds.includes(String(game.steamAppId)) : false;
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-12">
+              {games.map((game) => {
+                // Strict ownership check: game.steamAppId MUST match an owned ID
+                const isOwned = game.steamAppId ? ownedGameIds.includes(String(game.steamAppId)) : false;
 
-              const status = !steamStatus.linked
-                ? 'steam_not_linked'
-                : isOwned
-                  ? 'owned'
-                  : 'not_owned';
+                const status = !steamStatus.linked
+                  ? 'steam_not_linked'
+                  : isOwned
+                    ? 'owned'
+                    : 'not_owned';
 
-              return (
-                <GameCard
-                  key={game.id}
-                  game={game}
-                  status={status}
-                />
-              );
-            })}
-          </div>
+                return (
+                  <GameCard
+                    key={game.id}
+                    game={game}
+                    status={status}
+                  />
+                );
+              })}
+            </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex justify-center items-center gap-4 py-8">
+                <button
+                  onClick={() => handlePageChange(page - 1)}
+                  disabled={page === 1}
+                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition text-white"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+
+                <div className="flex items-center gap-2">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+                    <button
+                      key={pageNum}
+                      onClick={() => handlePageChange(pageNum)}
+                      className={cn(
+                        "w-10 h-10 rounded-lg font-semibold transition",
+                        page === pageNum
+                          ? "bg-purple-600 text-white"
+                          : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white"
+                      )}
+                    >
+                      {pageNum}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => handlePageChange(page + 1)}
+                  disabled={page === totalPages}
+                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition text-white"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

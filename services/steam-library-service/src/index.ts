@@ -35,6 +35,67 @@ const app = Fastify({
 });
 
 // ---------------------
+// Health
+// ---------------------
+app.get('/health', async () => {
+  return successResponse({ status: 'OK', service: 'steam-library-service' });
+});
+
+/**
+ * Extract and validate Steam ID from OpenID claimed_id URL
+ * 
+ * @param claimedId - Full OpenID claimed_id URL
+ * @returns 17-digit Steam ID or null if invalid
+ * 
+ * Example: https://steamcommunity.com/openid/id/76561198136376383
+ * Returns: 76561198136376383
+ */
+function extractSteamId64(claimedId: string): string | null {
+  if (!claimedId) {
+    console.error('[extractSteamId64] ❌ Empty claimed_id provided');
+    return null;
+  }
+
+  console.log('[extractSteamId64] Processing claimed_id:', '...' + claimedId.slice(-30));
+
+  // Extract numeric ID from end of URL using regex
+  // Matches 15-25 digit numbers at the end (Steam IDs are typically 17 digits)
+  const match = claimedId.match(/\/(\d{15,25})$/);
+
+  if (!match) {
+    console.error('[extractSteamId64] ❌ No numeric ID found in URL');
+    console.error('[extractSteamId64] Pattern expected: https://steamcommunity.com/openid/id/[digits]');
+    return null;
+  }
+
+  const steamId64 = match[1];
+
+  // Validate it's exactly 17 digits (standard Steam ID format)
+  if (!/^\d{17}$/.test(steamId64)) {
+    console.error('[extractSteamId64] ❌ Invalid Steam ID format');
+    console.error('[extractSteamId64] Expected: 17 digits');
+    console.error('[extractSteamId64] Got:', steamId64.length, 'digits');
+    return null;
+  }
+
+  // Additional validation: Steam IDs start with specific prefixes
+  // Most common: 765611... (64-bit representation)
+  if (!steamId64.startsWith('7656')) {
+    console.warn('[extractSteamId64] ⚠️ Unusual Steam ID prefix (expected 7656...)');
+    console.warn('[extractSteamId64] Proceeding anyway - ID:', '...' + steamId64.slice(-4));
+  }
+
+  console.log('[extractSteamId64] ✅ VALID Steam ID extracted');
+  console.log('[extractSteamId64] Last 4 digits:', '...' + steamId64.slice(-4));
+  console.log('[extractSteamId64] Length:', steamId64.length, 'digits');
+
+  return steamId64;
+}
+
+// ---------------------
+// Routes
+// ---------------------
+// ---------------------
 // Plugins
 // ---------------------
 app.register(cors as any, {
@@ -103,25 +164,47 @@ app.get('/callback', async (request: any, reply) => {
 
     app.log.info('[SteamCallback] Received Steam callback');
 
-    // 1. CSRF Validation - Check state parameter
-    const receivedState = params.state;
-    const storedState = cookies['steam_oauth_state'];
+    // 1. Extract session ID from state parameter
+    const linkSessionId = params.state;
 
-    if (!receivedState || !storedState || receivedState !== storedState) {
-      app.log.error({
-        receivedState,
-        hasStoredState: !!storedState,
-        statesMatch: receivedState === storedState
-      }, '[SteamCallback] CSRF validation failed');
-
-      // Clear the state cookie
-      reply.clearCookie('steam_oauth_state');
-
-      return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3005'}/games?error=steam_csrf_failed`);
+    if (!linkSessionId) {
+      console.error('[SteamCallback] ❌ No state parameter (linkSessionId) received');
+      return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3005'}/games?error=steam_invalid_state`);
     }
 
-    // Clear the state cookie after successful validation
-    reply.clearCookie('steam_oauth_state');
+    // 2. Look up secure link session from DB
+    console.log('[CALLBACK TRUTH] ==========================================');
+    console.log('[CALLBACK TRUTH] Looking up SteamLinkSession...');
+    console.log('[CALLBACK TRUTH] linkSessionId =', linkSessionId);
+
+    const linkSession = await prisma.steamLinkSession.findUnique({
+      where: { id: linkSessionId },
+      include: { user: { select: { id: true, email: true, steamId64: true } } }
+    });
+
+    if (!linkSession) {
+      console.error('[SteamCallback] ❌ Link session not found or expired');
+      console.error('[SteamCallback] linkSessionId =', linkSessionId);
+      return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3005'}/games?error=steam_session_expired`);
+    }
+
+    // 3. Validate session not expired
+    if (linkSession.expiresAt < new Date()) {
+      console.error('[SteamCallback] ❌ Link session expired');
+      console.error('[SteamCallback] expiresAt =', linkSession.expiresAt.toISOString());
+      await prisma.steamLinkSession.delete({ where: { id: linkSessionId } });
+      return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3005'}/games?error=steam_session_expired`);
+    }
+
+    // 4. Extract userId from session (SECURE & DETERMINISTIC)
+    const userId = linkSession.userId;
+
+    console.log('[CALLBACK TRUTH] ✅ Link session found and valid');
+    console.log('[CALLBACK TRUTH] userId from DB =', userId);
+    console.log('[CALLBACK TRUTH] user email =', linkSession.user.email);
+    console.log('[CALLBACK TRUTH] current steamId64 =', linkSession.user.steamId64 || 'NULL');
+    console.log('[CALLBACK TRUTH] SECURE: One-time session prevents CSRF');
+    console.log('[CALLBACK TRUTH] ==========================================');
 
     // 2. Validate OpenID Response
     if (params['openid.mode'] !== 'id_res') {
@@ -129,42 +212,28 @@ app.get('/callback', async (request: any, reply) => {
       return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3005'}/games?error=steam_cancel`);
     }
 
-    // 3. Extract Steam ID from claimed_id
+
+    // 3. Extract Steam ID from claimed_id using robust extraction function
     const claimedId = params['openid.claimed_id'];
     if (!claimedId) {
+      console.error('[SteamCallback] ❌ Missing openid.claimed_id parameter');
       app.log.error('[SteamCallback] Missing openid.claimed_id');
       return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3005'}/games?error=steam_invalid`);
     }
 
-    const steamId64 = claimedId.split('/').pop();
-    if (!steamId64 || !/^\d{17}$/.test(steamId64)) {
-      app.log.error({ claimedId, steamId64 }, '[SteamCallback] Invalid Steam ID format');
+    console.log('[SteamCallback] 📋 Calling extractSteamId64...');
+    const steamId64 = extractSteamId64(claimedId);
+
+    if (!steamId64) {
+      console.error('[SteamCallback] ❌ Failed to extract valid Steam ID from claimed_id');
+      app.log.error({ claimedId: '...' + claimedId.slice(-20) }, '[SteamCallback] Steam ID extraction failed');
       return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3005'}/games?error=steam_invalid`);
     }
 
-    app.log.info({ steamId64 }, '[SteamCallback] Extracted Steam ID');
+    console.log('[SteamCallback] 🔑 STEAMID64 EXTRACTED:', '...' + steamId64.slice(-4));
 
-    // 4. Identify User from JWT
-    // The user must be logged in (JWT in cookie) to link their Steam account
-    const token = cookies['strike_access_token'];
-
-    if (!token) {
-      app.log.error('[SteamCallback] No JWT token found in cookies');
-      return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3005'}/auth/login?error=steam_link_needs_login`);
-    }
-
-    let userId: string;
-    let userEmail: string;
-
-    try {
-      const payload = verifyAccessToken(token);
-      userId = payload.userId;
-      userEmail = payload.email;
-      app.log.info({ userId, userEmail }, '[SteamCallback] User identified from JWT');
-    } catch (e: any) {
-      app.log.error({ error: e.message }, '[SteamCallback] Invalid or expired JWT token');
-      return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3005'}/auth/login?error=steam_link_session_expired`);
-    }
+    // User already verified from linkSession above
+    console.log('[SteamCallback] 👤 USER_ID (from link session):', userId);
 
     // 5. Check if Steam ID is already linked to another user
     const existingUser = await prisma.user.findFirst({
@@ -175,26 +244,46 @@ app.get('/callback', async (request: any, reply) => {
     });
 
     if (existingUser) {
-      app.log.error({ steamId64, existingUserId: existingUser.id }, '[SteamCallback] Steam ID already linked to another account');
+      console.log('[SteamCallback] ⚠️ STEAMID ALREADY LINKED to user:', existingUser.id);
+      app.log.error({ steamId64: '...' + steamId64.slice(-4), existingUserId: existingUser.id }, '[SteamCallback] Steam ID already linked to another account');
       return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3005'}/games?error=steam_already_linked`);
     }
 
     // 6. Update Database - Link Steam ID to user
-    await prisma.user.update({
+    console.log('[SteamCallback] 💾 UPDATING DATABASE...');
+    console.log('[SteamCallback] 💾 WHERE: userId =', userId);
+    console.log('[SteamCallback] 💾 SET: steamId64 =', steamId64);
+
+    const updateResult = await prisma.user.update({
       where: { id: userId },
       data: { steamId64: steamId64 },
     });
 
+    console.log('[SteamCallback] ✅ DB UPDATE SUCCESSFUL');
+    console.log('[SteamCallback] ✅ UPDATED USER:', updateResult.id);
+    console.log('[SteamCallback] ✅ CONFIRMED STEAMID64:', updateResult.steamId64);
+
+    // Verify the update worked
+    const verifyUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { steamId64: true }
+    });
+    console.log('[SteamCallback] 🔍 VERIFICATION: DB contains steamId64 =', verifyUser?.steamId64);
+
     const elapsedMs = Date.now() - startTime;
     app.log.info({
       userId,
-      userEmail,
-      steamId64,
+      steamId64: '...' + steamId64.slice(-4),
       elapsedMs
     }, '[SteamCallback] ✅ Successfully linked Steam account');
 
-    // 7. Redirect to Frontend with success
-    return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3005'}/games?steam=linked`);
+    // 7. Delete one-time link session (security cleanup)
+    await prisma.steamLinkSession.delete({ where: { id: linkSessionId } });
+    console.log('[SteamCallback] 🗑️ Deleted one-time link session');
+
+    // 8. Redirect to Frontend with success
+    const redirectPath = linkSession.redirect || '/games';
+    return reply.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3005'}${redirectPath}?steam=linked`);
 
   } catch (error: any) {
     const elapsedMs = Date.now() - startTime;
@@ -220,7 +309,12 @@ app.get(
     try {
       const userId = request.user.userId;
       console.log('[Steam Library Service] === OWNED GAMES REQUEST ===');
+      console.log('[Steam Library Service] CorrelationID:', request.headers['x-correlation-id']);
       console.log('[Steam Library Service] User ID:', userId);
+
+      // Diagnostic DB check
+      const dbUser = await prisma.user.findUnique({ where: { id: userId }, select: { steamId64: true } });
+      console.log('[Steam Library Service] DB Lookup SteamID64:', dbUser?.steamId64 ? `...${dbUser.steamId64.slice(-4)}` : 'NULL');
 
       const result = await steamService.getOwnedGamesForUser(userId);
 
@@ -289,6 +383,74 @@ app.get(
           }
         })
       );
+    }
+  }
+);
+
+// GET /api/steam/debug/verify-steamid - Verify steamId64 in DB
+app.get(
+  '/api/steam/debug/verify-steamid',
+  { preHandler: [authMiddleware as any] },
+  async (request: any, reply) => {
+    try {
+      const userId = request.user.userId;
+      console.log('[DEBUG verify-steamid] Checking for userId:', userId);
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, steamId64: true }
+      });
+
+      if (!user) {
+        console.log('[DEBUG verify-steamid] User not found');
+        return reply.status(404).send(errorResponse(ErrorCodes.NOT_FOUND, 'User not found'));
+      }
+
+      const result = {
+        userId: user.id,
+        email: user.email,
+        steamId64_last4: user.steamId64 ? '...' + user.steamId64.slice(-4) : null,
+        steamId64_exists: !!user.steamId64,
+        steamId64_full: user.steamId64 // Include full for debugging (will be logged)
+      };
+
+      console.log('[DEBUG verify-steamid] Result:', {
+        ...result,
+        steamId64_full: result.steamId64_full ? '...' + result.steamId64_full.slice(-6) : null
+      });
+
+      return successResponse({
+        userId: result.userId,
+        email: result.email,
+        steamId64_last4: result.steamId64_last4,
+        steamId64_exists: result.steamId64_exists
+      });
+    } catch (error: any) {
+      console.error('[DEBUG verify-steamid] Error:', error.message);
+      return reply.status(500).send(errorResponse(ErrorCodes.INTERNAL_ERROR, error.message));
+    }
+  }
+);
+
+// GET /api/steam/debug/me-steam - Diagnostic endpoint
+app.get(
+  '/api/steam/debug/me-steam',
+  { preHandler: [authMiddleware as any] },
+  async (request: any, reply) => {
+    try {
+      const userId = request.user.userId;
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, steamId64: true }
+      });
+
+      return successResponse({
+        userId: user?.id,
+        steamId64_last4: user?.steamId64 ? `...${user.steamId64.slice(-4)}` : null,
+        steamId64_exists: !!user?.steamId64
+      });
+    } catch (error: any) {
+      return reply.status(500).send(errorResponse(ErrorCodes.INTERNAL_ERROR, error.message));
     }
   }
 );

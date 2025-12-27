@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
         }
 
         const gatewayUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-        const targetUrl = `${gatewayUrl}/api/steam/v1/owned-games`;
+        const targetUrl = `${gatewayUrl}/api/steam/v1/steam/owned-games`;
 
         console.log('[Steam API Route] Calling gateway:', targetUrl);
 

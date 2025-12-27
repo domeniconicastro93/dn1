@@ -18,11 +18,11 @@ import {
   ErrorCodes,
   RateLimitConfigs,
   rateLimiter,
-  registerRequestSchema,
-  loginRequestSchema,
-  refreshTokenRequestSchema,
-  passwordResetRequestSchema,
-  passwordResetConfirmSchema,
+  // registerRequestSchema, // MOVED TO LOCAL
+  // loginRequestSchema, // MOVED TO LOCAL
+  // refreshTokenRequestSchema, // MOVED TO LOCAL
+  // passwordResetRequestSchema, // MOVED TO LOCAL
+  // passwordResetConfirmSchema, // MOVED TO LOCAL
   generateTokenPair,
   verifyRefreshToken,
   generateAccessToken,
@@ -32,6 +32,14 @@ import {
   EventTopics,
   EventTypes,
 } from '@strike/shared-utils';
+// Local validation schemas (temporary fix for zod dependency issue)
+import {
+  registerRequestSchema,
+  loginRequestSchema,
+  refreshTokenRequestSchema,
+  passwordResetRequestSchema,
+  passwordResetConfirmSchema,
+} from './validation';
 import { prisma } from '@strike/shared-db';
 import type {
   RegisterRequestDTO,
@@ -742,6 +750,51 @@ app.get<{ Params: { provider: string }; Querystring: { redirectUri?: string } }>
       console.error('Error initiating OAuth flow:', error);
       return reply.status(500).send(
         errorResponse(ErrorCodes.INTERNAL_ERROR, 'Failed to initiate OAuth flow')
+      );
+    }
+  }
+);
+
+// POST /api/auth/v1/steam/disconnect
+app.post(
+  '/api/auth/v1/steam/disconnect',
+  {
+    preHandler: [rateLimitMiddleware],
+  },
+  async (request, reply) => {
+    try {
+      const authHeader = request.headers.authorization;
+      const cookieHeader = request.headers.cookie;
+      const token = localExtractToken(authHeader, cookieHeader);
+
+      if (!token) {
+        return reply.status(401).send(
+          errorResponse(ErrorCodes.UNAUTHORIZED, 'Authentication required')
+        );
+      }
+
+      const payload = verifyAccessToken(token);
+      if (!payload) {
+        return reply.status(401).send(
+          errorResponse(ErrorCodes.INVALID_TOKEN, 'Invalid or expired token')
+        );
+      }
+
+      // Update user to remove Steam ID
+      await prisma.user.update({
+        where: { id: payload.userId },
+        data: { steamId64: null },
+      });
+
+      console.log(`[AUTH] User ${payload.userId} disconnected Steam account`);
+
+      return reply.status(200).send(
+        successResponse({ message: 'Steam account disconnected successfully' })
+      );
+    } catch (error) {
+      console.error('Steam disconnect error:', error);
+      return reply.status(500).send(
+        errorResponse(ErrorCodes.INTERNAL_ERROR, 'Failed to disconnect Steam account')
       );
     }
   }

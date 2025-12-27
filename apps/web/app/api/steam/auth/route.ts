@@ -26,8 +26,7 @@ async function setStateCookie(state: SteamLinkState) {
 /**
  * Steam Auth Initiation Route
  * 
- * Verifies user is authenticated in Strike, then redirects to Steam OpenID.
- * This route only handles the initiation phase.
+ * Creates a secure one-time SteamLinkSession in DB, then redirects to Steam OpenID.
  */
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -39,32 +38,38 @@ export async function GET(request: NextRequest) {
     // Get redirect path from query params (default to /games)
     const redirectPath = url.searchParams.get('redirect') || '/games';
 
-    // Generate nonce for CSRF protection
+    // Create secure one-time link session in DB
+    const { PrismaClient } = await import('@prisma/client');
+    const prisma = new PrismaClient();
+
     const nonce = randomUUID();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
-    // Create state object compatible with service
-    const state = {
-      nonce,
-      userId: session.userId,
-      redirect: redirectPath,
-    };
-
-    const stateBase64 = Buffer.from(JSON.stringify(state)).toString('base64url');
-
-    // Store state in cookie (must match what service expects)
-    console.error('[STEAM AUTH] Setting state cookie:', stateBase64);
-    (await cookies()).set(STATE_COOKIE, stateBase64, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-      maxAge: 300,
+    const linkSession = await prisma.steamLinkSession.create({
+      data: {
+        userId: session.userId,
+        nonce,
+        redirect: redirectPath,
+        expiresAt
+      }
     });
 
-    // Build Steam OpenID URL and redirect
-    const steamUrl = buildSteamLoginUrl(stateBase64);
+    await prisma.$disconnect();
+
+    console.log('[CONNECT steam] ============================================');
+    console.log('[CONNECT steam] USER AUTHENTICATED');
+    console.log('[CONNECT steam] userId =', session.userId);
+    console.log('[CONNECT steam] linkSessionId =', linkSession.id);
+    console.log('[CONNECT steam] expiresAt =', expiresAt.toISOString());
+    console.log('[CONNECT steam] SECURE: Using DB-backed one-time session');
+    console.log('[CONNECT steam] ============================================');
+
+    // Build Steam OpenID URL with session ID as state
+    const steamUrl = buildSteamLoginUrl(linkSession.id);
+    console.log('[CONNECT steam] Redirecting to Steam OpenID...');
     return NextResponse.redirect(steamUrl);
-  } catch {
+  } catch (error: any) {
+    console.error('[CONNECT steam] Error:', error.message);
     // No Strike session - redirect to login with error
     return NextResponse.redirect(new URL('/auth/login?error=steam_requires_auth', url.origin));
   }

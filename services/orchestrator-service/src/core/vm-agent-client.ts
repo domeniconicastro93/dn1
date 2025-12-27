@@ -107,14 +107,15 @@ export class VMAgentClient {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-            // Use /api/launch endpoint and x-strike-agent-key header (per VM Agent spec)
-            const response = await fetch(`${this.agentUrl}/api/launch`, {
+            // ✅ FIX: Use proven endpoint and headers from manual test
+            const response = await fetch(`${this.agentUrl}/launch`, { // Changed from /api/launch
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-strike-agent-key': this.token
+                    'X-Strike-Token': this.token // Changed from x-strike-agent-key
                 },
-                body: JSON.stringify({ appId: Number(steamAppId) }), // VM Agent expects appId, not steamAppId
+                // ✅ FIX: Send steamAppId as string, matching proven curl command
+                body: JSON.stringify({ steamAppId: String(steamAppId) }),
                 signal: controller.signal
             });
 

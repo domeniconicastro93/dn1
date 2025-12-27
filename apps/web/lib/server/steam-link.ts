@@ -22,12 +22,37 @@ function decodePayload(raw?: string | null): SteamLinkPayload | null {
   }
 }
 
+/**
+ * Get linked Steam ID for a user from the DATABASE (NOT cookies)
+ * This ensures UI state reflects actual DB state
+ */
 export async function getLinkedSteamId(userId: string): Promise<string | null> {
-  const payload = decodePayload((await cookies()).get(STEAM_LINK_COOKIE)?.value);
-  if (!payload || payload.userId !== userId) {
+  try {
+    // Query database directly - this is the source of truth
+    const { prisma } = await import('@strike/shared-db');
+
+    console.log('[getLinkedSteamId] ==========================================');
+    console.log('[getLinkedSteamId] Prisma import successful');
+    console.log('[getLinkedSteamId] DB query for userId:', userId.slice(0, 8) + '...');
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { steamId64: true }
+    });
+
+    const steamId64 = user?.steamId64 || null;
+
+    console.log('[getLinkedSteamId] Query result:');
+    console.log('[getLinkedSteamId] - User found:', !!user);
+    console.log('[getLinkedSteamId] - steamId64:', steamId64 ? '...' + steamId64.slice(-4) : 'NULL');
+    console.log('[getLinkedSteamId] ==========================================');
+
+    return steamId64;
+  } catch (error: any) {
+    console.error('[getLinkedSteamId] ❌ DB query failed:', error.message);
+    console.error('[getLinkedSteamId] Stack:', error.stack);
     return null;
   }
-  return payload.steamId64;
 }
 
 export async function linkSteamAccount(userId: string, steamId64: string) {

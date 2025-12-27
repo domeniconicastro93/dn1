@@ -37,9 +37,24 @@ export interface LibraryResult {
  */
 
 export async function getOwnedGames(steamId64: string): Promise<LibraryResult> {
+    // CRITICAL GUARD: Never call Steam API without valid steamId64
+    if (!steamId64 || steamId64.trim() === '') {
+        console.error('[STEAM API TRACE] ❌ STEAM_API_CALLED_WITHOUT_STEAMID');
+        console.error('[STEAM API TRACE] Request blocked before Steam call');
+        console.error('[STEAM API TRACE] steamId64 received:', steamId64 || 'NULL/EMPTY');
+        return {
+            games: [],
+            privacyState: 'unknown'
+        };
+    }
+
     // Enhanced diagnostic logging - toggleable via STEAM_DEBUG_LOG
     const DEBUG_STEAM = process.env.STEAM_DEBUG_LOG === 'true' || process.env.DEBUG_STEAM === 'true';
     const startTime = Date.now();
+
+    console.log('[STEAM API TRACE] ==========================================');
+    console.log('[STEAM API TRACE] getOwnedGames called');
+    console.log('[STEAM API TRACE] steamId64:', '...' + steamId64.slice(-4));
 
     if (DEBUG_STEAM) {
         console.log(`[SteamWebAPI] 🔍 === START STEAM API CALL ===`);
@@ -105,8 +120,10 @@ export async function getOwnedGames(steamId64: string): Promise<LibraryResult> {
 
     const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?${params.toString()}`;
 
+    // Always log for debugging
+    console.log(`[SteamWebAPI] 📡 Request URL: ${url.replace(STEAM_API_KEY, '***REDACTED***')}`);
+
     if (DEBUG_STEAM) {
-        console.log(`[SteamWebAPI] 📡 Request URL: ${url.replace(STEAM_API_KEY, '***REDACTED***')}`);
         console.log(`[SteamWebAPI] 📡 Parameters:`);
         console.log(`[SteamWebAPI]    - steamid: ${steamId64}`);
         console.log(`[SteamWebAPI]    - include_appinfo: 1`);
@@ -157,6 +174,8 @@ export async function getOwnedGames(steamId64: string): Promise<LibraryResult> {
         // Case: PUBLIC with actual games
         if (result.games && result.games.length > 0) {
             console.log(`[SteamWebAPI] ✅ SUCCESS: User owns ${result.games.length} games (PUBLIC library)`);
+            console.log('[STEAM API TRACE] totalOwnedGames =', result.games.length);
+            console.log('[STEAM API TRACE] ==========================================');
 
             // CRITICAL: Log ALL AppIDs for debugging
             console.log('[SteamWebAPI] 🎮 ALL OWNED APPIDS:');
